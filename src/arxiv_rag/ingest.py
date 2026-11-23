@@ -76,6 +76,7 @@ def fetch_papers(query: str, max_results: int, pdf_dir: Path) -> list[dict]:
 def pdf_to_text(path: Path) -> str:
     import pymupdf
 
+    pymupdf.TOOLS.mupdf_display_errors(False)  # harmless drawing-syntax warnings
     with pymupdf.open(path) as doc:
         return "\n".join(page.get_text() for page in doc)
 

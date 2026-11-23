@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 from pathlib import Path
 
@@ -14,6 +15,23 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 # Hide per-request HTTP logs from HuggingFace / LiteLLM; keep our own progress logs.
 for _noisy in ("httpx", "httpcore", "huggingface_hub", "urllib3", "LiteLLM", "filelock"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+
+def friendly_errors(fn):
+    """Show LLM config problems as one clear line instead of a long traceback."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        from .generate import LLMError
+
+        try:
+            return fn(*args, **kwargs)
+        except LLMError as e:
+            typer.secho(f"LLM error: {e}", fg="red", err=True)
+            raise typer.Exit(1) from None
+
+    return wrapper
+
 
 DEFAULT_QUERY = 'abs:"retrieval-augmented generation" OR abs:"LLM agents"'
 
@@ -49,7 +67,19 @@ def index():
     typer.echo(f"Indexed {index_chunks(chunks, embedder, store)} chunks with {s.embed_model}")
 
 
+@app.command("check-llm")
+@friendly_errors
+def check_llm_cmd():
+    """Make one tiny LLM call to confirm the model name and API key work."""
+    from .generate import check_llm
+
+    s = Settings()
+    reply = check_llm(s.llm_model).strip()
+    typer.secho(f"OK: {s.llm_model} replied {reply[:40]!r}", fg="green")
+
+
 @app.command("make-testset")
+@friendly_errors
 def make_testset_cmd(
     n: int = typer.Option(50, help="Number of questions"),
     out: Path = typer.Option(Path("eval/testset.jsonl")),
@@ -81,8 +111,12 @@ def eval_cmd(
     from .evaluation import evaluate_retrieval, load_testset, record_results
     from .pipeline import RAGPipeline
 
+    items = load_testset(testset) if testset.exists() else []
+    if not items:
+        typer.echo(f"No questions in {testset}. Run `arxiv-rag make-testset` first.", err=True)
+        raise typer.Exit(1)
     pipe = RAGPipeline.from_settings()
-    results = evaluate_retrieval(pipe.retriever, load_testset(testset), k=k)
+    results = evaluate_retrieval(pipe.retriever, items, k=k)
     path = record_results(results, name, testset.parent)
     for key, v in results.items():
         typer.echo(f"{key:>16}: {v}")
@@ -90,6 +124,7 @@ def eval_cmd(
 
 
 @app.command()
+@friendly_errors
 def ask(question: str, k: int = typer.Option(5)):
     """Ask a question and print the cited answer."""
     from .pipeline import RAGPipeline

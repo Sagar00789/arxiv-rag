@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from .retrieve import Hit
@@ -28,14 +29,41 @@ def build_messages(question: str, hits: Sequence[Hit]) -> list[dict]:
     ]
 
 
+class LLMError(RuntimeError):
+    """A configuration problem with the LLM (bad model name, missing/invalid key)."""
+
+
+def _short_message(e: Exception) -> str:
+    text = str(e)
+    m = re.search(r'"message":\s*"([^"]+)"', text)  # provider's own explanation, if any
+    return (m.group(1) if m else text.splitlines()[0])[:400]
+
+
 def complete(messages: list[dict], model: str, temperature: float = 0.0) -> str:
     import litellm
 
-    # num_retries backs off on rate limits, which free tiers hit quickly
-    resp = litellm.completion(
-        model=model, messages=messages, temperature=temperature, num_retries=5
-    )
+    litellm.suppress_debug_info = True
+    try:
+        # num_retries backs off on rate limits, which free tiers hit quickly
+        resp = litellm.completion(
+            model=model, messages=messages, temperature=temperature, num_retries=5
+        )
+    except (litellm.NotFoundError, litellm.BadRequestError) as e:
+        raise LLMError(
+            f"Model '{model}' was rejected: {_short_message(e)}\n"
+            "Set LLM_MODEL to a model your provider currently offers."
+        ) from None
+    except litellm.AuthenticationError as e:
+        raise LLMError(
+            f"API key rejected for '{model}': {_short_message(e)}\n"
+            "Check the key for this provider (e.g. GEMINI_API_KEY)."
+        ) from None
     return resp.choices[0].message.content or ""
+
+
+def check_llm(model: str) -> str:
+    """One tiny call, so a bad model or key fails in seconds rather than mid-run."""
+    return complete([{"role": "user", "content": "Reply with the word OK."}], model=model)
 
 
 def generate_answer(question: str, hits: Sequence[Hit], model: str) -> str:

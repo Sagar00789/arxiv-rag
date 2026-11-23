@@ -17,7 +17,7 @@ def _env(name: str, default: str) -> str:
 
 @dataclass(frozen=True)
 class Settings:
-    llm_model: str = field(default_factory=lambda: _env("LLM_MODEL", "gemini/gemini-2.5-flash"))
+    llm_model: str = field(default_factory=lambda: _env("LLM_MODEL", "gemini/gemini-3.8-flash"))
     embed_model: str = field(default_factory=lambda: _env("EMBED_MODEL", "BAAI/bge-small-en-v1.5"))
     data_dir: Path = field(default_factory=lambda: Path(_env("DATA_DIR", "data")))
     qdrant_path: str = field(default_factory=lambda: _env("QDRANT_PATH", "qdrant_data"))

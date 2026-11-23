@@ -111,7 +111,11 @@ def make_testset(
     chunks: list[Chunk], n: int, model: str, seed: int = 42, min_words: int = 120
 ) -> list[TestItem]:
     """Sample chunks and have an LLM write one question per chunk (that chunk is the gold)."""
+    import logging
+
     from .generate import complete
+
+    log = logging.getLogger(__name__)
 
     rng = random.Random(seed)
     candidates = [c for c in chunks if len(c.text.split()) >= min_words]
@@ -132,6 +136,8 @@ def make_testset(
                 reference_answer=(data.get("answer") or "").strip() or None,
             )
         )
+        if len(items) % 10 == 0:
+            log.info("Generated %d/%d questions", len(items), n)
     return items
 
 
