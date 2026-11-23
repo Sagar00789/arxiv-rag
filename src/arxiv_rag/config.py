@@ -26,6 +26,11 @@ class Settings:
     collection: str = field(default_factory=lambda: _env("COLLECTION", "arxiv_chunks"))
     chunk_size: int = field(default_factory=lambda: int(_env("CHUNK_SIZE", "300")))
     chunk_overlap: int = field(default_factory=lambda: int(_env("CHUNK_OVERLAP", "50")))
+    # dense | bm25 | hybrid | hybrid-rerank
+    retriever: str = field(default_factory=lambda: _env("RETRIEVER", "dense"))
+    reranker_model: str = field(
+        default_factory=lambda: _env("RERANKER_MODEL", "BAAI/bge-reranker-base")
+    )
     top_k: int = field(default_factory=lambda: int(_env("TOP_K", "5")))
 
     @property

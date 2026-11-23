@@ -29,8 +29,9 @@ flowchart LR
 | Experiment | chunk hit@5 | chunk MRR | paper hit@5 | p50 latency |
 |---|---|---|---|---|
 | Baseline: dense retrieval | 0.60 | 0.42 | 0.94 | 17 ms |
-| + Hybrid search (BM25 + dense, RRF) | _planned_ | | | |
-| + Cross-encoder reranker | _planned_ | | | |
+| BM25 (keywords only) | _running_ | | | |
+| Hybrid: BM25 + dense, RRF | _running_ | | | |
+| Hybrid + cross-encoder reranker | _running_ | | | |
 | + Section-aware chunking | _planned_ | | | |
 
 Full log: [`eval/RESULTS.md`](eval/RESULTS.md). Test set: 50 LLM-generated questions
@@ -54,7 +55,7 @@ arxiv-rag ingest --max-results 50 # download and chunk papers
 arxiv-rag index                   # embed into Qdrant
 arxiv-rag ask "How does Self-RAG decide when to retrieve?"
 arxiv-rag make-testset --n 50     # then review eval/testset.jsonl
-arxiv-rag eval --name baseline-dense
+arxiv-rag eval -r dense -r bm25 -r hybrid -r hybrid-rerank
 uvicorn arxiv_rag.api:app --reload  # POST /ask at http://localhost:8000/docs
 ```
 
@@ -64,6 +65,10 @@ uvicorn arxiv_rag.api:app --reload  # POST /ask at http://localhost:8000/docs
 - **Embedded Qdrant:** a real vector DB with no server to run; the same code works against Qdrant Cloud.
 - **Retrieval is evaluated separately from generation:** if the right chunk isn't retrieved,
   no prompt can fix the answer, so retrieval is measured first.
+- **Reciprocal rank fusion for hybrid search:** it merges rankings by position, not score, so
+  BM25 and cosine scores (on totally different scales) never need tuning against each other.
+- **Rerank only a shortlist:** the cross-encoder is far more accurate but about 100× slower per
+  passage than an embedding lookup, so it re-scores just the top 30 hybrid candidates.
 - **Offline tests:** a hashing embedder and in-memory Qdrant let CI run in seconds with no keys.
 
 ## Project layout
@@ -74,7 +79,7 @@ src/arxiv_rag/
   chunking.py    cleaning (drops reference lists) and overlapping windows
   embed.py       embedding interface + sentence-transformers
   store.py       Qdrant wrapper
-  retrieve.py    retrievers + indexing
+  retrieve.py    dense, BM25, hybrid (RRF) and reranking retrievers
   generate.py    cited-answer prompt, LLM call
   evaluation.py  test-set generation, hit@k / MRR, results log
   pipeline.py    retrieval + generation
@@ -88,8 +93,9 @@ notebooks/       Colab GPU quickstart
 
 - [x] Baseline pipeline, CLI, API, eval harness, CI
 - [x] Baseline numbers on a reviewed 50-question test set (49 papers, 1,681 chunks)
-- [ ] Hybrid retrieval (BM25 + dense with reciprocal rank fusion)
-- [ ] Cross-encoder reranking
+- [x] Hybrid retrieval (BM25 + dense with reciprocal rank fusion)
+- [x] Cross-encoder reranking
+- [ ] Measure both on the test set
 - [ ] Answer quality evals (faithfulness and citation accuracy, LLM-as-judge)
 - [ ] Tracing and cost tracking (Langfuse)
 - [ ] Web UI + live deployment

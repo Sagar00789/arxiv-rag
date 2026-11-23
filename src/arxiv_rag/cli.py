@@ -113,33 +113,42 @@ def make_testset_cmd(
 
 @app.command("eval")
 def eval_cmd(
-    name: str = typer.Option("baseline-dense", help="Experiment name for the results table"),
+    retriever: list[str] = typer.Option(
+        None, "--retriever", "-r", help="dense | bm25 | hybrid | hybrid-rerank (repeatable)"
+    ),
+    name: str = typer.Option(None, help="Experiment name (default: the retriever name)"),
     testset: Path = typer.Option(Path("eval/testset.jsonl")),
     k: int = typer.Option(5),
 ):
-    """Score retrieval on the test set and append a row to eval/RESULTS.md."""
+    """Score retrieval on the test set and append a row per retriever to eval/RESULTS.md."""
     from .evaluation import evaluate_retrieval, load_testset, record_results
-    from .pipeline import RAGPipeline
+    from .pipeline import build_retriever
 
     items = load_testset(testset) if testset.exists() else []
     if not items:
         typer.echo(f"No questions in {testset}. Run `arxiv-rag make-testset` first.", err=True)
         raise typer.Exit(1)
-    pipe = RAGPipeline.from_settings()
-    results = evaluate_retrieval(pipe.retriever, items, k=k)
-    path = record_results(results, name, testset.parent)
-    for key, v in results.items():
-        typer.echo(f"{key:>16}: {v}")
-    typer.echo(f"Saved {path}")
+    s = Settings()
+    for r in retriever or [s.retriever]:
+        results = evaluate_retrieval(build_retriever(s, r), items, k=k)
+        exp = name if name and len(retriever or []) <= 1 else r
+        record_results(results, exp, testset.parent)
+        summary = "  ".join(f"{key}={v}" for key, v in results.items() if key not in ("n", "k"))
+        typer.secho(f"{exp:>14}: {summary}", fg="green")
+    typer.echo(f"Logged to {testset.parent / 'RESULTS.md'}")
 
 
 @app.command()
 @friendly_errors
-def ask(question: str, k: int = typer.Option(5)):
+def ask(
+    question: str,
+    k: int = typer.Option(5),
+    retriever: str = typer.Option(None, "--retriever", "-r", help="Override RETRIEVER"),
+):
     """Ask a question and print the cited answer."""
     from .pipeline import RAGPipeline
 
-    ans = RAGPipeline.from_settings().ask(question, k)
+    ans = RAGPipeline.from_settings(retriever=retriever).ask(question, k)
     typer.echo(ans.answer + "\n\nSources:")
     for i, h in enumerate(ans.sources, start=1):
         typer.echo(f"  [{i}] {h.chunk.title} (arXiv:{h.chunk.paper_id}) score={h.score:.3f}")
