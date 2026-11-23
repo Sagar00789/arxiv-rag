@@ -75,6 +75,29 @@ about ±0.07, so gaps under ~0.1 aren't meaningful; gaps like 0.26 → 0.50 are.
    scores 0.8/90 ≈ 0.0089. So the reranker's 30 candidates are always exactly BM25's: the
    weighting silently removed dense from the candidate pool.
 
+### Do bigger embedding models help?
+
+Same corpus, re-indexed with two larger BGE models (one collection per model, `-e` flag).
+Chunk hit@5:
+
+| Embedding model (dims) | Dense, original | Dense, paraphrased | `hybrid@0.8`, original | `hybrid@0.8`, paraphrased |
+|---|---|---|---|---|
+| bge-small (384) | 0.60 | 0.22 | 0.82 | 0.46 |
+| bge-base (768) | 0.58 | 0.30 | 0.86 | 0.48 |
+| bge-large (1024) | 0.58 | **0.36** | 0.84 | 0.42 |
+
+6. **Bigger embeddings only help when the wording differs.** On original questions all three
+   score ~0.6: the words already match, so a better model of meaning adds nothing. On
+   paraphrased questions dense improves steadily, 0.22 → 0.30 → 0.36, the one place where
+   modelling *meaning* matters. (0.22 → 0.36 is about two standard errors: suggestive, not proof.)
+7. **…and the gain disappears inside `hybrid@0.8`.** With 80% weight on BM25, the hybrid
+   hardly listens to dense (finding 5), so a better dense model barely moves it (0.46 → 0.42–0.48,
+   all within noise). The model upgrade and the fusion weight interact: to cash in a better
+   embedding model, the weight has to shift back toward dense.
+8. **The cost is real:** bge-large is 3× the parameters, about 2× slower per query (33 vs 16 ms
+   on a T4) and took 188 s vs ~40 s to index. For this corpus, bge-small inside `hybrid@0.8`
+   remains the best value.
+
 ### Answer quality
 
 Retrieval metrics only say whether the right passage was *found*. `arxiv-rag eval-answers`
@@ -88,8 +111,8 @@ also grades the final answers with an LLM judge (a different model from the one 
 _Results: running (see [`eval/ANSWERS.md`](eval/ANSWERS.md))._
 
 ### Next experiments
-- **Bigger embedding models** (bge-base / bge-large, now supported with `-e`): dense is the weak
-  link on both sets, and the only component that could close the gap on paraphrased questions.
+- **Equal-weight hybrid with bge-large** on paraphrased questions: dense-large (0.36) and BM25
+  (0.26) should make different mistakes, which is exactly when fusion pays off (finding 2).
 - **A stronger reranker** (e.g. bge-reranker-v2-m3) to test whether the reranker result is about
   this model or about reranking in general.
 
@@ -160,8 +183,8 @@ eval/            test sets, results logs, and the arXiv IDs of the corpus
 - [x] Weighted fusion (`hybrid@0.8`) and BM25 + rerank (`bm25-rerank`)
 - [x] Results on both test sets → `hybrid@0.8` is the default retriever
 - [x] Answer-quality evals (faithfulness, citation accuracy, correctness; LLM-as-judge)
-- [x] Multiple embedding models side by side
-- [ ] Results for both of the above
+- [x] Multiple embedding models side by side (helps only on paraphrased questions)
+- [ ] Answer-quality results
 - [ ] Tracing and cost tracking (Langfuse)
 - [x] Web UI (Gradio) + auto-deploy to Hugging Face Spaces
 - [ ] Live demo link
