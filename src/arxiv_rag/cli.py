@@ -283,7 +283,7 @@ def eval_answers_cmd(
         typer.echo(f"Progress saved in {log_path}. Re-run the same command to continue.")
         raise
     summary = summarize(judged)
-    record_answer_results(summary, exp, testset.parent)
+    record_answer_results(summary, exp, testset.parent, s.llm_model, judge)
     for key, v in summary.items():
         typer.secho(f"{key:>32}: {v}", fg="green")
     typer.echo(f"Details: {log_path}   Summary: {testset.parent / 'ANSWERS.md'}")

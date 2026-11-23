@@ -110,7 +110,27 @@ also grades the final answers with an LLM judge (a different model from the one 
 - **Correctness:** agreement with the reference answer (yes / partial / no)
 - **Correct when gold retrieved:** separates retrieval failures from generation failures
 
-_Results: running (see [`eval/ANSWERS.md`](eval/ANSWERS.md))._
+**First results** (`hybrid@0.8`, the first 25 original questions; per-answer details in
+[`eval/answers/`](eval/answers/)):
+
+| Faithfulness | Citation accuracy | Correctness | Refused | Gold passage retrieved | Correct when gold retrieved |
+|---|---|---|---|---|---|
+| 1.00 | 1.00 | 0.96 | 1 / 25 | 0.80 | 1.00 |
+
+9. **Generation isn't the bottleneck; retrieval is.** Every time the gold passage was retrieved,
+   the answer was correct. The errors that remain are retrieval errors.
+10. **Passage-level hit@5 understates what users get.** In 4 of the 5 questions where the exact
+    gold passage was missed, the answer was still correct: it came from a *neighbouring*
+    passage of the same paper (e.g. passage 15 instead of 16). Papers restate key facts across
+    sections, so "right paper, nearby passage" is often enough.
+11. **The one refusal was the right call.** The system found the right paper but not the
+    passage stating the claim, and answered "I couldn't find this" instead of guessing. The
+    judge confirmed the retrieved passages don't state it explicitly.
+
+**Treat the perfect scores with suspicion.** 1.00 faithfulness on 25 easy, keyword-matching
+questions more likely means a lenient LLM judge than a perfect system. Next: the paraphrased
+set, a judge from a different model family, and a hand-check of 10 answers to measure how often
+the judge agrees with a human.
 
 ### Next experiments
 - **Equal-weight hybrid with bge-large** on paraphrased questions: dense-large (0.36) and BM25
@@ -192,6 +212,7 @@ eval/            test sets, results logs, and the arXiv IDs of the corpus
 - [x] Results on both test sets → `hybrid@0.8` is the default retriever
 - [x] Answer-quality evals (faithfulness, citation accuracy, correctness; LLM-as-judge)
 - [x] Multiple embedding models side by side (helps only on paraphrased questions)
-- [ ] Answer-quality results
+- [x] First answer-quality results (generation is solid; retrieval is the bottleneck)
+- [ ] Answer quality on paraphrased questions + human check of the LLM judge
 - [ ] Tracing and cost tracking (Langfuse)
 - [x] [Live web demo](https://arxiv-rag-sagar.streamlit.app/) (Streamlit) that fits free hosting: FastEmbed (ONNX) instead of PyTorch

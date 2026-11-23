@@ -160,7 +160,13 @@ def summarize(judged: list[JudgedAnswer]) -> dict:
     }
 
 
-def record_answer_results(summary: dict, name: str, eval_dir: Path) -> None:
+def _short(model: str) -> str:
+    return model.split("/")[-1]
+
+
+def record_answer_results(
+    summary: dict, name: str, eval_dir: Path, answer_model: str = "?", judge_model: str = "?"
+) -> None:
     md = eval_dir / "ANSWERS.md"
     if not md.exists():
         md.write_text(
@@ -168,14 +174,16 @@ def record_answer_results(summary: dict, name: str, eval_dir: Path) -> None:
             "Each row: retrieve top 5 -> answer with the LLM -> grade with an LLM judge.\n"
             "Faithfulness and citation accuracy exclude refusals; correctness counts a refusal "
             "as wrong.\nPer-question details: `eval/answers/*.jsonl`.\n\n"
-            "| date (UTC) | experiment | n | faithfulness | citation acc. | correctness "
-            "| refusals | gold retrieved | correct when gold retrieved |\n"
-            "|---|---|---|---|---|---|---|---|---|\n"
+            "| date (UTC) | experiment | answer model | judge model | n | faithfulness "
+            "| citation acc. | correctness | refusals | gold retrieved "
+            "| correct when gold retrieved |\n"
+            "|---|---|---|---|---|---|---|---|---|---|---|\n"
         )
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     s = summary
     row = (
-        f"| {stamp} | {name} | {s['n']} | {s['faithfulness']} | {s['citation_accuracy']} "
+        f"| {stamp} | {name} | {_short(answer_model)} | {_short(judge_model)} | {s['n']} "
+        f"| {s['faithfulness']} | {s['citation_accuracy']} "
         f"| {s['correctness']} | {s['refusal_rate']} | {s['gold_retrieved']} "
         f"| {s['correctness_when_gold_retrieved']} |\n"
     )

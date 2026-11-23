@@ -168,3 +168,14 @@ def test_ui_results_tab_reads_readme(tmp_path):
     readme.write_text("# x\n## Results\n| a | b |\n## Quickstart\n")
     assert ui.results_markdown(readme).startswith("## Results")
     assert "GitHub" in ui.results_markdown(tmp_path / "missing.md")
+
+
+def test_answer_results_record_which_models(tmp_path):
+    from arxiv_rag.answer_eval import record_answer_results
+
+    keys = ["faithfulness", "citation_accuracy", "correctness", "gold_retrieved"]
+    summary = {"n": 1, "refusal_rate": 0.0, "correctness_when_gold_retrieved": 1.0}
+    summary |= dict.fromkeys(keys, 1.0)
+    record_answer_results(summary, "x", tmp_path, "gemini/a-lite", "gemini/b-judge")
+    row = (tmp_path / "ANSWERS.md").read_text().splitlines()[-1]
+    assert "| a-lite | b-judge |" in row
