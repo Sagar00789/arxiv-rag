@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -101,6 +102,8 @@ class Answer:
     question: str
     answer: str
     sources: list[Hit] = field(default_factory=list)
+    retrieval_s: float = 0.0
+    generation_s: float = 0.0
 
 
 class RAGPipeline:
@@ -117,5 +120,8 @@ class RAGPipeline:
         return cls(build_retriever(s, retriever or s.retriever), s.llm_model, s.top_k)
 
     def ask(self, question: str, k: int | None = None) -> Answer:
+        t0 = time.perf_counter()
         hits = self.retriever.retrieve(question, k or self.top_k)
-        return Answer(question, generate_answer(question, hits, self.llm_model), hits)
+        t1 = time.perf_counter()
+        text = generate_answer(question, hits, self.llm_model)
+        return Answer(question, text, hits, t1 - t0, time.perf_counter() - t1)

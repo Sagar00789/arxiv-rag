@@ -28,16 +28,29 @@ EXAMPLES = [
 PipelineFactory = Callable[[str], RAGPipeline]
 
 
-def format_sources(ans: Answer) -> str:
+def score_label(retriever: str) -> str:
+    """What the number next to each source means, which differs by retriever."""
+    if retriever.endswith("-rerank"):
+        return "rerank score"
+    base = retriever.split("@")[0]
+    return {
+        "dense": "cosine similarity",
+        "bm25": "BM25 score",
+        "hybrid": "fusion score (RRF, ranks only, always small)",
+    }.get(base, "score")
+
+
+def format_sources(ans: Answer, retriever: str = "") -> str:
     if not ans.sources:
         return "_No passages retrieved._"
+    label = score_label(retriever)
     parts = []
     for i, h in enumerate(ans.sources, start=1):
         c = h.chunk
         snippet = html.escape(c.text[:600] + ("…" if len(c.text) > 600 else ""))
         parts.append(
             f"**[{i}] [{html.escape(c.title)}](https://arxiv.org/abs/{c.paper_id})**  \n"
-            f"<sub>arXiv:{c.paper_id} · passage {c.position} · score {h.score:.3f}</sub>\n"
+            f"<sub>arXiv:{c.paper_id} · passage {c.position} · {label} {h.score:.3f}</sub>\n"
             f"<details><summary>Show passage</summary>\n\n{snippet}\n\n</details>"
         )
     return "\n\n".join(parts)
@@ -59,8 +72,12 @@ def answer_question(question: str, retriever: str, factory: PipelineFactory) -> 
     except IndexMissingError as e:
         return f"⚠️ {e}", ""
     took = time.perf_counter() - t0
-    footer = f"\n\n<sub>{retriever} · {len(ans.sources)} passages · {took:.1f}s</sub>"
-    return ans.answer + footer, format_sources(ans)
+    footer = (
+        f"\n\n<sub>{retriever} · {len(ans.sources)} passages · "
+        f"retrieval {ans.retrieval_s * 1000:.0f} ms · LLM {ans.generation_s:.1f} s · "
+        f"total {took:.1f} s</sub>"
+    )
+    return ans.answer + footer, format_sources(ans, retriever)
 
 
 def results_markdown(readme: Path = Path("README.md")) -> str:

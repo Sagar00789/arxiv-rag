@@ -100,3 +100,18 @@ def test_locked_retriever_serialises_access(retriever):
     r = LockedRetriever(retriever, lock)
     assert r.retrieve("dense retrieval", 1)
     assert not lock.locked()
+
+
+def test_ui_shows_timing_split_and_score_meaning(demo):
+    d, _ = demo
+    answer, sources = ui.answer_question("agents tool actions", "hybrid@0.8", d.pipeline)
+    assert "retrieval" in answer and "LLM" in answer
+    assert "fusion score" in sources
+
+
+@pytest.mark.parametrize(
+    "name,label",
+    [("dense", "cosine"), ("bm25", "BM25"), ("hybrid@0.8", "fusion"), ("bm25-rerank", "rerank")],
+)
+def test_score_label(name, label):
+    assert label in ui.score_label(name)
