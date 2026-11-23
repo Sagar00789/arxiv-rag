@@ -108,36 +108,55 @@ def _parse_json(text: str) -> dict | None:
 
 
 def make_testset(
-    chunks: list[Chunk], n: int, model: str, seed: int = 42, min_words: int = 120
+    chunks: list[Chunk],
+    n: int,
+    model: str,
+    out_path: Path,
+    seed: int = 42,
+    min_words: int = 120,
 ) -> list[TestItem]:
-    """Sample chunks and have an LLM write one question per chunk (that chunk is the gold)."""
+    """Have an LLM write one question per sampled chunk (that chunk is the gold label).
+
+    Each question is appended to `out_path` as soon as it exists, and a re-run resumes
+    from what's already there, so a crash or quota limit never loses finished work.
+    """
     import logging
 
     from .generate import complete
 
     log = logging.getLogger(__name__)
 
+    items = load_testset(out_path) if out_path.exists() else []
+    used = {it.gold_chunk_id for it in items}
+    if items:
+        log.info("Resuming: %d questions already in %s", len(items), out_path)
+
     rng = random.Random(seed)
     candidates = [c for c in chunks if len(c.text.split()) >= min_words]
     rng.shuffle(candidates)
-    items: list[TestItem] = []
-    for c in candidates:
-        if len(items) >= n:
-            break
-        prompt = QUESTION_PROMPT.format(title=c.title, text=c.text)
-        data = _parse_json(complete([{"role": "user", "content": prompt}], model=model))
-        if not data or not data.get("question"):
-            continue
-        items.append(
-            TestItem(
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("a", encoding="utf-8") as f:
+        for c in candidates:
+            if len(items) >= n:
+                break
+            if c.chunk_id in used:
+                continue
+            prompt = QUESTION_PROMPT.format(title=c.title, text=c.text)
+            data = _parse_json(complete([{"role": "user", "content": prompt}], model=model))
+            if not data or not data.get("question"):
+                continue
+            item = TestItem(
                 question=data["question"].strip(),
                 gold_paper_id=c.paper_id,
                 gold_chunk_id=c.chunk_id,
                 reference_answer=(data.get("answer") or "").strip() or None,
             )
-        )
-        if len(items) % 10 == 0:
-            log.info("Generated %d/%d questions", len(items), n)
+            f.write(json.dumps(asdict(item), ensure_ascii=False) + "\n")
+            f.flush()
+            items.append(item)
+            used.add(c.chunk_id)
+            if len(items) % 5 == 0:
+                log.info("Generated %d/%d questions", len(items), n)
     return items
 
 

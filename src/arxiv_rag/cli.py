@@ -83,22 +83,32 @@ def check_llm_cmd():
 def make_testset_cmd(
     n: int = typer.Option(50, help="Number of questions"),
     out: Path = typer.Option(Path("eval/testset.jsonl")),
+    rpm: float = typer.Option(12, help="Max LLM requests per minute (free tiers allow ~15)"),
+    fresh: bool = typer.Option(False, help="Delete the existing test set and start over"),
 ):
-    """Generate a synthetic test set with the LLM. Review it by hand before trusting it."""
+    """Generate a synthetic test set with the LLM (resumable). Review it by hand after."""
     from .chunking import load_chunks
-    from .evaluation import make_testset, save_testset
+    from .evaluation import load_testset, make_testset
+    from .generate import LLMError, set_rate_limit
 
     s = Settings()
     chunks = load_chunks(s.chunks_path) if s.chunks_path.exists() else []
     if not chunks:
         typer.echo(f"No chunks in {s.chunks_path}. Run `arxiv-rag ingest` first.", err=True)
         raise typer.Exit(1)
-    items = make_testset(chunks, n, s.llm_model)
+    if fresh and out.exists():
+        out.unlink()
+    set_rate_limit(rpm)
+    try:
+        items = make_testset(chunks, n, s.llm_model, out)
+    except LLMError:
+        saved = len(load_testset(out)) if out.exists() else 0
+        typer.echo(f"{saved} questions saved in {out}. Re-run the same command to continue.")
+        raise
     if not items:
         typer.echo("The LLM produced no usable questions. Check LLM_MODEL and API key.", err=True)
         raise typer.Exit(1)
-    save_testset(items, out)
-    typer.echo(f"Wrote {len(items)} questions to {out}")
+    typer.echo(f"{len(items)} questions in {out}")
 
 
 @app.command("eval")
