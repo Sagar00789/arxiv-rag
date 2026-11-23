@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# generated data (re-create with `arxiv-rag ingest` / `arxiv-rag index`)
+data/
+qdrant_data/
+eval/results/*.json
