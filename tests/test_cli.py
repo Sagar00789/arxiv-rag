@@ -18,12 +18,12 @@ def test_short_message_extracts_provider_explanation():
 
 def test_llm_errors_are_one_clean_line(monkeypatch):
     def boom(model):
-        raise generate.LLMError("Model 'x' was rejected: gone")
+        raise generate.LLMError("Request to 'x' was rejected: gone")
 
     monkeypatch.setattr(generate, "check_llm", boom)
     result = runner.invoke(app, ["check-llm"])
     assert result.exit_code == 1
-    assert "LLM error: Model 'x' was rejected: gone" in result.output
+    assert "LLM error: Request to 'x' was rejected: gone" in result.output
     assert "Traceback" not in result.output
 
 

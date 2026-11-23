@@ -43,6 +43,9 @@ def complete(messages: list[dict], model: str, temperature: float = 0.0) -> str:
     import litellm
 
     litellm.suppress_debug_info = True
+    # Some models (e.g. newer Gemini) reject settings like `temperature`; drop them
+    # instead of failing, so any LLM_MODEL works without code changes.
+    litellm.drop_params = True
     try:
         # num_retries backs off on rate limits, which free tiers hit quickly
         resp = litellm.completion(
@@ -50,8 +53,8 @@ def complete(messages: list[dict], model: str, temperature: float = 0.0) -> str:
         )
     except (litellm.NotFoundError, litellm.BadRequestError) as e:
         raise LLMError(
-            f"Model '{model}' was rejected: {_short_message(e)}\n"
-            "Set LLM_MODEL to a model your provider currently offers."
+            f"Request to '{model}' was rejected: {_short_message(e)}\n"
+            "If the model name is wrong, set LLM_MODEL to one your provider currently offers."
         ) from None
     except litellm.AuthenticationError as e:
         raise LLMError(
