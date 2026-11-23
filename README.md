@@ -28,13 +28,19 @@ flowchart LR
 
 | Experiment | chunk hit@5 | chunk MRR | paper hit@5 | p50 latency |
 |---|---|---|---|---|
-| Baseline: dense retrieval | _running_ | | | |
+| Baseline: dense retrieval | 0.60 | 0.42 | 0.94 | 17 ms |
 | + Hybrid search (BM25 + dense, RRF) | _planned_ | | | |
 | + Cross-encoder reranker | _planned_ | | | |
 | + Section-aware chunking | _planned_ | | | |
 
-Full log: [`eval/RESULTS.md`](eval/RESULTS.md). Test set: LLM-generated questions, one per
-sampled chunk, reviewed by hand. The source chunk is the gold label.
+Full log: [`eval/RESULTS.md`](eval/RESULTS.md). Test set: 50 LLM-generated questions
+(gemini-3.5-flash-lite) across 32 papers, one per sampled chunk, reviewed by hand; the source
+chunk is the gold label. Corpus: 49 arXiv papers on RAG and LLM agents → 1,681 chunks.
+
+**Reading the baseline:** the right *paper* is in the top 5 for 94% of questions, but the exact
+right *passage* only 60% of the time. Dense embeddings find the topic but miss specifics such as
+names, numbers and acronyms ("MAIN-RAG", "S&P 100"). That's what keyword search (BM25) is good
+at, so hybrid retrieval is the next experiment.
 
 ## Quickstart
 
@@ -81,7 +87,7 @@ notebooks/       Colab GPU quickstart
 ## Roadmap
 
 - [x] Baseline pipeline, CLI, API, eval harness, CI
-- [ ] Baseline numbers on a reviewed 50-question test set
+- [x] Baseline numbers on a reviewed 50-question test set (49 papers, 1,681 chunks)
 - [ ] Hybrid retrieval (BM25 + dense with reciprocal rank fusion)
 - [ ] Cross-encoder reranking
 - [ ] Answer quality evals (faithfulness and citation accuracy, LLM-as-judge)
