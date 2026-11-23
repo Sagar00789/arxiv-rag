@@ -115,3 +115,36 @@ def test_ui_shows_timing_split_and_score_meaning(demo):
 )
 def test_score_label(name, label):
     assert label in ui.score_label(name)
+
+
+class CountingEmbedder(HashingEmbedder):
+    def __init__(self):
+        self.calls = 0
+
+    def embed_documents(self, texts):
+        self.calls += 1
+        return super().embed_documents(texts)
+
+
+def test_restart_reuses_cached_embeddings(tmp_path):
+    s = dataclasses.replace(Settings(), data_dir=tmp_path, embed_backend="fastembed")
+    save_chunks(CORPUS, s.chunks_path)
+    first, second = CountingEmbedder(), CountingEmbedder()
+    msgs = []
+    build_demo(s, tmp_path / "x", msgs.append, lambda m: first)
+    d = build_demo(s, tmp_path / "x", msgs.append, lambda m: second)
+    assert first.calls == 1 and second.calls == 0  # second start skipped embedding
+    assert any("cached embeddings" in m for m in msgs)
+    assert (
+        d.pipeline("dense").retriever.retrieve("low rank adapters", 1)[0].chunk.chunk_id == "p3::0"
+    )
+
+
+def test_cache_ignored_when_corpus_changes(tmp_path):
+    s = dataclasses.replace(Settings(), data_dir=tmp_path, embed_backend="fastembed")
+    save_chunks(CORPUS, s.chunks_path)
+    build_demo(s, tmp_path / "x", embedder_factory=lambda m: HashingEmbedder())
+    save_chunks(CORPUS[:2], s.chunks_path)  # different corpus
+    again = CountingEmbedder()
+    build_demo(s, tmp_path / "x", embedder_factory=lambda m: again)
+    assert again.calls == 1

@@ -51,7 +51,13 @@ st.markdown(
 ask_tab, results_tab = st.tabs(["Ask", "How well does it work?"])
 
 with ask_tab:
+    waiting = st.empty()
+    waiting.info(
+        "⏳ Loading the search index… Usually a few seconds; up to ~5 minutes right after "
+        "the app wakes up or is updated."
+    )
     demo = load_demo()
+    waiting.empty()
     labels = {label: value for label, value in RETRIEVER_CHOICES}
     with st.form("ask"):
         question = st.text_input("Question", placeholder=EXAMPLES[0])

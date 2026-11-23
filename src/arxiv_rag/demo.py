@@ -8,6 +8,7 @@ Free hosting has little RAM and no persistent disk, so the demo:
 
 from __future__ import annotations
 
+import json
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -17,7 +18,7 @@ from .chunking import Chunk, load_chunks
 from .config import Settings
 from .embed import Embedder
 from .pipeline import RAGPipeline, assemble_retriever
-from .retrieve import BM25Retriever, DenseRetriever, Hit, Retriever, index_chunks
+from .retrieve import BM25Retriever, DenseRetriever, Hit, Retriever
 from .store import VectorStore
 
 Progress = Callable[[str], None]
@@ -73,6 +74,34 @@ def ensure_corpus(s: Settings, ids_file: Path, progress: Progress) -> list[Chunk
     return load_chunks(s.chunks_path)
 
 
+def _vectors_path(s: Settings) -> Path:
+    return s.data_dir / f"vectors_{s.dense_collection}.json"
+
+
+def load_cached_vectors(s: Settings, chunks: list[Chunk], dim: int) -> list[list[float]] | None:
+    """Embeddings saved by an earlier start, so code updates and restarts skip re-embedding.
+    Ignored unless they match the current chunks and model exactly."""
+    path = _vectors_path(s)
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    ids = [c.chunk_id for c in chunks]
+    vecs = data.get("vectors", [])
+    if data.get("chunk_ids") != ids or not vecs or len(vecs[0]) != dim:
+        return None
+    return vecs
+
+
+def save_cached_vectors(s: Settings, chunks: list[Chunk], vectors: list[list[float]]) -> None:
+    path = _vectors_path(s)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"chunk_ids": [c.chunk_id for c in chunks], "vectors": vectors}
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload))
+    tmp.replace(path)  # atomic: a crash mid-write never leaves a broken cache
+
+
 def build_demo(
     s: Settings,
     ids_file: Path,
@@ -84,10 +113,17 @@ def build_demo(
         from .embed import FastEmbedEmbedder
 
         embedder_factory = FastEmbedEmbedder
-    progress(f"Embedding {len(chunks)} passages with {s.embed_model}…")
     embedder = embedder_factory(s.embed_model)
     store = VectorStore(":memory:", s.dense_collection, embedder.dim)
-    index_chunks(chunks, embedder, store)
+    vectors = load_cached_vectors(s, chunks, embedder.dim)
+    if vectors is None:
+        progress(f"Embedding {len(chunks):,} passages with {s.embed_model} (first start only)…")
+        vectors = embedder.embed_documents([c.text for c in chunks])
+        save_cached_vectors(s, chunks, vectors)
+    else:
+        progress(f"Loaded {len(chunks):,} cached embeddings.")
+    store.reset()
+    store.upsert(chunks, vectors)
     progress("Building the keyword index…")
     return Demo(
         chunks=chunks,
