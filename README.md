@@ -26,22 +26,33 @@ flowchart LR
 
 ## Results
 
-| Experiment | chunk hit@5 | chunk MRR | paper hit@5 | p50 latency |
+| Retriever | chunk hit@5 | chunk MRR | paper hit@5 | p50 latency |
 |---|---|---|---|---|
-| Baseline: dense retrieval | 0.60 | 0.42 | 0.94 | 17 ms |
-| BM25 (keywords only) | _running_ | | | |
-| Hybrid: BM25 + dense, RRF | _running_ | | | |
-| Hybrid + cross-encoder reranker | _running_ | | | |
-| + Section-aware chunking | _planned_ | | | |
+| Dense (bge-small embeddings) | 0.60 | 0.42 | 0.94 | 17 ms |
+| **BM25 (keywords)** | **0.88** | 0.72 | **0.98** | **5 ms** |
+| Hybrid: dense + BM25, RRF | 0.72 | 0.59 | 0.96 | 27 ms |
+| Hybrid + cross-encoder rerank | 0.84 | **0.73** | **0.98** | 878 ms |
 
 Full log: [`eval/RESULTS.md`](eval/RESULTS.md). Test set: 50 LLM-generated questions
 (gemini-3.5-flash-lite) across 32 papers, one per sampled chunk, reviewed by hand; the source
 chunk is the gold label. Corpus: 49 arXiv papers on RAG and LLM agents → 1,681 chunks.
 
-**Reading the baseline:** the right *paper* is in the top 5 for 94% of questions, but the exact
-right *passage* only 60% of the time. Dense embeddings find the topic but miss specifics such as
-names, numbers and acronyms ("MAIN-RAG", "S&P 100"). That's what keyword search (BM25) is good
-at, so hybrid retrieval is the next experiment.
+### What the numbers say
+
+1. **BM25 wins, at a third of dense's latency.** Research papers are full of exact, rare terms
+   (method names like "MAIN-RAG", dataset names, numbers) that keyword matching nails and a
+   small embedding model blurs together. Dense retrieval finds the right *paper* (0.94) but
+   often not the right *passage* (0.60).
+2. **Hybrid made things worse than BM25 alone (0.72 vs 0.88).** Equal-weight fusion lets the
+   weaker dense ranking push BM25's correct hits out of the top 5. Fusion pays off when the two
+   retrievers are similarly strong and make *different* mistakes, which isn't the case here.
+3. **The reranker recovers most of that loss and ranks best (MRR 0.73)**: when it finds the
+   passage, it puts it nearer the top. But it is ~30× slower than hybrid (878 vs 27 ms on a T4), which
+   matters for an interactive app.
+4. **Caveat: this test set favours keyword search.** The questions were written by an LLM
+   *looking at the passage*, so they reuse its exact wording. Real users paraphrase. The next
+   experiment re-runs everything on paraphrased questions to see whether dense and hybrid
+   close the gap when the wording doesn't match.
 
 ## Quickstart
 
@@ -95,7 +106,9 @@ notebooks/       Colab GPU quickstart
 - [x] Baseline numbers on a reviewed 50-question test set (49 papers, 1,681 chunks)
 - [x] Hybrid retrieval (BM25 + dense with reciprocal rank fusion)
 - [x] Cross-encoder reranking
-- [ ] Measure both on the test set
+- [x] Measure all retrievers on the test set (BM25 wins; see analysis above)
+- [ ] Paraphrased test set to check the keyword-overlap bias
+- [ ] Weighted fusion and BM25 + rerank
 - [ ] Answer quality evals (faithfulness and citation accuracy, LLM-as-judge)
 - [ ] Tracing and cost tracking (Langfuse)
 - [ ] Web UI + live deployment

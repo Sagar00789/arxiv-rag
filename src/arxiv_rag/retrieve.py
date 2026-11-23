@@ -105,7 +105,8 @@ def cross_encoder_scorer(model_name: str, device: str | None = None) -> Scorer:
     model = CrossEncoder(model_name, device=device)
 
     def score(query: str, texts: list[str]) -> list[float]:
-        return [float(x) for x in model.predict([(query, t) for t in texts])]
+        pairs = [(query, t) for t in texts]
+        return [float(x) for x in model.predict(pairs, show_progress_bar=False)]
 
     return score
 

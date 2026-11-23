@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import uuid
 from dataclasses import asdict
 
@@ -23,6 +24,8 @@ class VectorStore:
         )
         self.collection = collection
         self.dim = dim
+        # Close cleanly before interpreter shutdown (avoids a noisy warning from __del__).
+        atexit.register(self.client.close)
 
     def reset(self) -> None:
         if self.client.collection_exists(self.collection):

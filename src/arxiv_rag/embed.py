@@ -39,5 +39,7 @@ class SentenceTransformerEmbedder:
         return vecs.tolist()
 
     def embed_query(self, text: str) -> list[float]:
-        vec = self.model.encode(self.query_prefix + text, normalize_embeddings=True)
+        vec = self.model.encode(
+            self.query_prefix + text, normalize_embeddings=True, show_progress_bar=False
+        )
         return vec.tolist()
