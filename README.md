@@ -67,6 +67,8 @@ arxiv-rag index                   # embed into Qdrant
 arxiv-rag ask "How does Self-RAG decide when to retrieve?"
 arxiv-rag make-testset --n 50     # then review eval/testset.jsonl
 arxiv-rag eval -r dense -r bm25 -r hybrid -r hybrid-rerank
+arxiv-rag paraphrase-testset      # questions reworded away from the passage's wording
+arxiv-rag eval -r bm25 -r hybrid@0.8 -r bm25-rerank --testset eval/testset_paraphrased.jsonl
 uvicorn arxiv_rag.api:app --reload  # POST /ask at http://localhost:8000/docs
 ```
 
@@ -107,8 +109,9 @@ notebooks/       Colab GPU quickstart
 - [x] Hybrid retrieval (BM25 + dense with reciprocal rank fusion)
 - [x] Cross-encoder reranking
 - [x] Measure all retrievers on the test set (BM25 wins; see analysis above)
-- [ ] Paraphrased test set to check the keyword-overlap bias
-- [ ] Weighted fusion and BM25 + rerank
+- [x] Paraphrased test set + word-overlap measurement (`paraphrase-testset`)
+- [x] Weighted fusion (`hybrid@0.8`) and BM25 + rerank (`bm25-rerank`)
+- [ ] Results on both test sets
 - [ ] Answer quality evals (faithfulness and citation accuracy, LLM-as-judge)
 - [ ] Tracing and cost tracking (Langfuse)
 - [ ] Web UI + live deployment

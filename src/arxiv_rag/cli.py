@@ -111,30 +111,80 @@ def make_testset_cmd(
     typer.echo(f"{len(items)} questions in {out}")
 
 
+@app.command("paraphrase-testset")
+@friendly_errors
+def paraphrase_testset_cmd(
+    src: Path = typer.Option(Path("eval/testset.jsonl"), "--in"),
+    out: Path = typer.Option(Path("eval/testset_paraphrased.jsonl")),
+    rpm: float = typer.Option(12, help="Max LLM requests per minute"),
+):
+    """Rewrite each test question so it doesn't reuse the passage's wording (resumable)."""
+    from .chunking import load_chunks
+    from .evaluation import load_testset, mean_overlap, paraphrase_testset
+    from .generate import LLMError, set_rate_limit
+
+    s = Settings()
+    chunks = {c.chunk_id: c for c in load_chunks(s.chunks_path)}
+    items = load_testset(src)
+    set_rate_limit(rpm)
+    try:
+        done = paraphrase_testset(items, chunks, s.llm_model, out)
+    except LLMError:
+        typer.echo(f"Progress saved in {out}. Re-run the same command to continue.")
+        raise
+    typer.echo(f"{len(done)}/{len(items)} questions paraphrased into {out}")
+    typer.secho(
+        f"Word overlap with gold passage: {mean_overlap(items, chunks)} (original) -> "
+        f"{mean_overlap(done, chunks)} (paraphrased)",
+        fg="green",
+    )
+
+
 @app.command("eval")
 def eval_cmd(
     retriever: list[str] = typer.Option(
-        None, "--retriever", "-r", help="dense | bm25 | hybrid | hybrid-rerank (repeatable)"
+        None,
+        "--retriever",
+        "-r",
+        help="dense | bm25 | hybrid[@w] | any of these + '-rerank' (repeatable)",
     ),
     name: str = typer.Option(None, help="Experiment name (default: the retriever name)"),
     testset: Path = typer.Option(Path("eval/testset.jsonl")),
     k: int = typer.Option(5),
 ):
     """Score retrieval on the test set and append a row per retriever to eval/RESULTS.md."""
-    from .evaluation import evaluate_retrieval, load_testset, record_results
-    from .pipeline import build_retriever
+    from .chunking import load_chunks
+    from .evaluation import evaluate_retrieval, load_testset, mean_overlap, record_results
+    from .pipeline import build_retriever, parse_retriever
 
     items = load_testset(testset) if testset.exists() else []
     if not items:
         typer.echo(f"No questions in {testset}. Run `arxiv-rag make-testset` first.", err=True)
         raise typer.Exit(1)
     s = Settings()
-    for r in retriever or [s.retriever]:
+    names = retriever or [s.retriever]
+    for r in names:  # fail fast on a typo, before loading any model
+        try:
+            parse_retriever(r)
+        except ValueError as e:
+            typer.secho(str(e), fg="red", err=True)
+            raise typer.Exit(1) from None
+
+    label = testset.stem.removeprefix("testset").strip("_-")  # "" or e.g. "paraphrased"
+    chunks = {c.chunk_id: c for c in load_chunks(s.chunks_path)} if s.chunks_path.exists() else {}
+    overlap = mean_overlap(items, chunks)
+    typer.echo(f"Test set {testset}: {len(items)} questions, word overlap {overlap}")
+    for r in names:
         results = evaluate_retrieval(build_retriever(s, r), items, k=k)
-        exp = name if name and len(retriever or []) <= 1 else r
+        results["word_overlap"] = overlap
+        exp = name if name and len(names) == 1 else r
+        if label:
+            exp = f"{exp} [{label}]"
         record_results(results, exp, testset.parent)
-        summary = "  ".join(f"{key}={v}" for key, v in results.items() if key not in ("n", "k"))
-        typer.secho(f"{exp:>14}: {summary}", fg="green")
+        summary = "  ".join(
+            f"{key}={v}" for key, v in results.items() if key not in ("n", "k", "word_overlap")
+        )
+        typer.secho(f"{exp:>32}: {summary}", fg="green")
     typer.echo(f"Logged to {testset.parent / 'RESULTS.md'}")
 
 

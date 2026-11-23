@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -10,7 +11,20 @@ from .config import Settings
 from .generate import generate_answer
 from .retrieve import Hit, Retriever
 
-RETRIEVERS = ("dense", "bm25", "hybrid", "hybrid-rerank")
+RETRIEVERS = ("dense", "bm25", "hybrid", "hybrid-rerank", "bm25-rerank")
+# Names: <dense|bm25|hybrid>[@<bm25 weight>][-rerank], e.g. "hybrid@0.8", "hybrid@0.8-rerank"
+_NAME = re.compile(r"^(dense|bm25|hybrid)(?:@(0(?:\.\d+)?|1(?:\.0+)?|\.\d+))?(-rerank)?$")
+
+
+def parse_retriever(name: str) -> tuple[str, float, bool]:
+    """Return (base, bm25_weight, rerank). Weight only applies to hybrid (default 0.5)."""
+    m = _NAME.match(name)
+    if not m or (m.group(2) and m.group(1) != "hybrid"):
+        raise ValueError(
+            f"Unknown retriever {name!r}. Use dense, bm25 or hybrid, optionally "
+            "hybrid@<bm25 weight 0-1> and/or a -rerank suffix, e.g. hybrid@0.8-rerank"
+        )
+    return m.group(1), float(m.group(2) or 0.5), bool(m.group(3))
 
 
 @functools.cache
@@ -25,6 +39,13 @@ def _dense(embed_model: str, qdrant_path: str, collection: str) -> Retriever:
 
 
 @functools.cache
+def _cross_encoder(model_name: str):
+    from .retrieve import cross_encoder_scorer
+
+    return cross_encoder_scorer(model_name)
+
+
+@functools.cache
 def _bm25(chunks_path: str) -> Retriever:
     from .chunking import load_chunks
     from .retrieve import BM25Retriever
@@ -36,25 +57,16 @@ def build_retriever(s: Settings, name: str) -> Retriever:
     """Build a retriever by name. Heavy pieces are only loaded when that name needs them."""
     from .retrieve import HybridRetriever, RerankRetriever
 
-    if name not in RETRIEVERS:
-        raise ValueError(f"Unknown retriever {name!r}; choose from {', '.join(RETRIEVERS)}")
+    base, w, rerank = parse_retriever(name)
 
-    def dense() -> Retriever:
-        return _dense(s.embed_model, s.qdrant_path, s.collection)
-
-    def bm25() -> Retriever:
-        return _bm25(str(s.chunks_path))
-
-    if name == "dense":
-        return dense()
-    if name == "bm25":
-        return bm25()
-    hybrid = HybridRetriever([dense(), bm25()])
-    if name == "hybrid":
-        return hybrid
-    from .retrieve import cross_encoder_scorer
-
-    return RerankRetriever(hybrid, cross_encoder_scorer(s.reranker_model))
+    if base == "dense":
+        r: Retriever = _dense(s.embed_model, s.qdrant_path, s.collection)
+    elif base == "bm25":
+        r = _bm25(str(s.chunks_path))
+    else:
+        dense = _dense(s.embed_model, s.qdrant_path, s.collection)
+        r = HybridRetriever([dense, _bm25(str(s.chunks_path))], weights=[1 - w, w])
+    return RerankRetriever(r, _cross_encoder(s.reranker_model)) if rerank else r
 
 
 @dataclass

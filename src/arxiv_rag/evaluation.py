@@ -160,6 +160,86 @@ def make_testset(
     return items
 
 
+# ---------- paraphrased test set ----------
+
+PARAPHRASE_PROMPT = """A researcher wants to find the passage below, but hasn't read it, so they \
+won't use its wording. Rewrite the question the way they would ask it.
+
+Rules:
+- Same meaning; the passage must still answer it.
+- Avoid the passage's distinctive words and phrases: use synonyms and plain descriptions.
+- If the question names a specific method, model or dataset, describe what it is or does
+  instead of naming it, unless the question becomes ambiguous without the name.
+- One question, natural and specific.
+
+Reply with JSON only: {{"question": "..."}}
+
+Passage:
+{text}
+
+Original question: {question}"""
+
+
+def paraphrase_testset(
+    items: list[TestItem], chunks_by_id: dict[str, Chunk], model: str, out_path: Path
+) -> list[TestItem]:
+    """Rewrite each question so it no longer echoes the gold passage's wording.
+
+    Gold labels are unchanged, so scores on the original and paraphrased sets are directly
+    comparable. Resumable, like make_testset.
+    """
+    import logging
+
+    from .generate import complete
+
+    log = logging.getLogger(__name__)
+    done = load_testset(out_path) if out_path.exists() else []
+    finished = {it.gold_chunk_id for it in done}
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("a", encoding="utf-8") as f:
+        for it in items:
+            if it.gold_chunk_id in finished:
+                continue
+            chunk = chunks_by_id.get(it.gold_chunk_id or "")
+            if chunk is None:
+                continue
+            prompt = PARAPHRASE_PROMPT.format(text=chunk.text, question=it.question)
+            data = _parse_json(complete([{"role": "user", "content": prompt}], model=model))
+            if not data or not data.get("question"):
+                continue
+            new = TestItem(
+                question=data["question"].strip(),
+                gold_paper_id=it.gold_paper_id,
+                gold_chunk_id=it.gold_chunk_id,
+                reference_answer=it.reference_answer,
+            )
+            f.write(json.dumps(asdict(new), ensure_ascii=False) + "\n")
+            f.flush()
+            done.append(new)
+            finished.add(it.gold_chunk_id)
+            if len(done) % 5 == 0:
+                log.info("Paraphrased %d/%d questions", len(done), len(items))
+    return done
+
+
+def word_overlap(question: str, passage: str) -> float:
+    """Share of the question's content words that also appear in the passage.
+    High overlap means keyword search has it easy."""
+    from .retrieve import tokenize
+
+    q = set(tokenize(question))
+    return len(q & set(tokenize(passage))) / len(q) if q else 0.0
+
+
+def mean_overlap(items: list[TestItem], chunks_by_id: dict[str, Chunk]) -> float | None:
+    vals = [
+        word_overlap(it.question, chunks_by_id[it.gold_chunk_id].text)
+        for it in items
+        if it.gold_chunk_id in chunks_by_id
+    ]
+    return round(statistics.fmean(vals), 3) if vals else None
+
+
 # ---------- results log ----------
 
 
@@ -167,7 +247,8 @@ def record_results(results: dict, name: str, eval_dir: Path) -> Path:
     """Save full results as JSON and append one row to eval/RESULTS.md."""
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     (eval_dir / "results").mkdir(parents=True, exist_ok=True)
-    out = eval_dir / "results" / f"{stamp.replace(' ', '_').replace(':', '')}_{name}.json"
+    safe = re.sub(r"[^\w.@-]+", "_", name).strip("_")
+    out = eval_dir / "results" / f"{stamp.replace(' ', '_').replace(':', '')}_{safe}.json"
     out.write_text(json.dumps({"name": name, "time": stamp, **results}, indent=2))
 
     k = results["k"]

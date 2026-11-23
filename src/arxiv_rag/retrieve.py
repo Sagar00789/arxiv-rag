@@ -68,28 +68,44 @@ class BM25Retriever:
 # ---------- hybrid (reciprocal rank fusion) ----------
 
 
-def reciprocal_rank_fusion(result_lists: Sequence[list[Hit]], k: int, rrf_k: int = 60) -> list[Hit]:
-    """Merge rankings by summing 1 / (rrf_k + rank). Uses ranks only, so the very
-    different score scales of BM25 and cosine similarity don't need calibrating."""
+def reciprocal_rank_fusion(
+    result_lists: Sequence[list[Hit]],
+    k: int,
+    rrf_k: int = 60,
+    weights: Sequence[float] | None = None,
+) -> list[Hit]:
+    """Merge rankings by summing weight / (rrf_k + rank). Uses ranks only, so the very
+    different score scales of BM25 and cosine similarity don't need calibrating.
+    Weights let a stronger retriever count for more."""
+    weights = list(weights) if weights is not None else [1.0] * len(result_lists)
+    if len(weights) != len(result_lists):
+        raise ValueError("need one weight per result list")
     scores: dict[str, float] = {}
     chunks: dict[str, Chunk] = {}
-    for hits in result_lists:
+    for hits, w in zip(result_lists, weights, strict=True):
         for rank, h in enumerate(hits, start=1):
             cid = h.chunk.chunk_id
-            scores[cid] = scores.get(cid, 0.0) + 1.0 / (rrf_k + rank)
+            scores[cid] = scores.get(cid, 0.0) + w / (rrf_k + rank)
             chunks[cid] = h.chunk
     best = sorted(scores, key=scores.__getitem__, reverse=True)[:k]
     return [Hit(chunks[cid], scores[cid]) for cid in best]
 
 
 class HybridRetriever:
-    def __init__(self, retrievers: Sequence[Retriever], candidates: int = 30):
+    def __init__(
+        self,
+        retrievers: Sequence[Retriever],
+        candidates: int = 30,
+        weights: Sequence[float] | None = None,
+    ):
         self.retrievers = list(retrievers)
         self.candidates = candidates
+        self.weights = weights
 
     def retrieve(self, query: str, k: int) -> list[Hit]:
         n = max(k, self.candidates)
-        return reciprocal_rank_fusion([r.retrieve(query, n) for r in self.retrievers], k)
+        lists = [r.retrieve(query, n) for r in self.retrievers]
+        return reciprocal_rank_fusion(lists, k, weights=self.weights)
 
 
 # ---------- reranking ----------

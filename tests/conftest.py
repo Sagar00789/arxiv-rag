@@ -2,9 +2,12 @@
 
 import hashlib
 import math
+import sys
+import types
 
 import pytest
 
+from arxiv_rag import generate
 from arxiv_rag.chunking import Chunk
 from arxiv_rag.retrieve import DenseRetriever, index_chunks
 from arxiv_rag.store import VectorStore
@@ -43,3 +46,46 @@ def retriever():
     store = VectorStore(":memory:", "test", emb.dim)
     index_chunks(CORPUS, emb, store)
     return DenseRetriever(emb, store)
+
+
+# ---------- fake litellm (for LLM retry / quota tests) ----------
+
+
+def fake_litellm(script):
+    """A stand-in litellm whose completion() replays `script` (exceptions or reply text)."""
+    mod = types.ModuleType("litellm")
+    for name in (
+        "NotFoundError",
+        "BadRequestError",
+        "AuthenticationError",
+        "RateLimitError",
+        "APIConnectionError",
+    ):
+        setattr(mod, name, type(name, (Exception,), {}))
+    calls = []
+
+    def completion(**kwargs):
+        calls.append(kwargs)
+        step = script.pop(0)
+        if isinstance(step, tuple):  # (exception name, message)
+            raise getattr(mod, step[0])(step[1])
+        msg = types.SimpleNamespace(content=step)
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
+
+    mod.completion = completion
+    mod.calls = calls
+    return mod
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    waited = []
+    monkeypatch.setattr(generate.time, "sleep", waited.append)
+    generate.set_rate_limit(0)
+    return waited
+
+
+def install(monkeypatch, script):
+    mod = fake_litellm(script)
+    monkeypatch.setitem(sys.modules, "litellm", mod)
+    return mod
