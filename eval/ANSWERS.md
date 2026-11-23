@@ -6,6 +6,7 @@ Per-question details: `eval/answers/*.jsonl`.
 
 | date (UTC) | experiment | answer model | judge model | n | faithfulness | citation acc. | correctness | refusals | gold retrieved | correct when gold retrieved |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 2026-11-23 20:50 | hybrid@0.8 | gemini-3.5-flash-lite | not recorded¹ | 25 | 1.0 | 1.0 | 0.96 | 0.04 | 0.8 | 1.0 |
+| 2026-11-23 20:50 | hybrid@0.8 | gemini-3.5-flash-lite | gemini-3.5-flash-lite¹ | 25 | 1.0 | 1.0 | 0.96 | 0.04 | 0.8 | 1.0 |
 
-¹ This first run predates logging the judge model; every later row records it.
+¹ Self-graded: the same model answered and judged (the other Gemini models were unavailable
+at the time). Self-grading tends to be lenient, so treat these scores as an upper bound.

@@ -127,8 +127,10 @@ also grades the final answers with an LLM judge (a different model from the one 
     passage stating the claim, and answered "I couldn't find this" instead of guessing. The
     judge confirmed the retrieved passages don't state it explicitly.
 
-**Treat the perfect scores with suspicion.** 1.00 faithfulness on 25 easy, keyword-matching
-questions more likely means a lenient LLM judge than a perfect system. Next: the paraphrased
+**Treat the perfect scores with suspicion.** This run was **self-graded**: `gemini-3.5-flash-lite`
+both wrote and judged the answers (other Gemini models were overloaded at the time), and models
+tend to grade their own output leniently. Together with 25 easy, keyword-matching questions,
+1.00 faithfulness is best read as an upper bound, not proof of a perfect system. Next: the paraphrased
 set, a judge from a different model family, and a hand-check of 10 answers to measure how often
 the judge agrees with a human.
 
