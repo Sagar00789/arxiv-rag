@@ -26,33 +26,53 @@ flowchart LR
 
 ## Results
 
-| Retriever | chunk hit@5 | chunk MRR | paper hit@5 | p50 latency |
-|---|---|---|---|---|
-| Dense (bge-small embeddings) | 0.60 | 0.42 | 0.94 | 17 ms |
-| **BM25 (keywords)** | **0.88** | 0.72 | **0.98** | **5 ms** |
-| Hybrid: dense + BM25, RRF | 0.72 | 0.59 | 0.96 | 27 ms |
-| Hybrid + cross-encoder rerank | 0.84 | **0.73** | **0.98** | 878 ms |
+Two test sets with the **same 50 gold passages**, asked two ways:
+- **Original:** LLM-written while looking at the passage, so the questions reuse its words
+  (keyword-friendly, the "easy" end).
+- **Paraphrased:** rewritten as someone who hasn't read the paper would ask: synonyms, and
+  methods described instead of named. Only 11% of its words appear in the original questions
+  (the "hard" end). Real users sit somewhere in between.
 
-Full log: [`eval/RESULTS.md`](eval/RESULTS.md). Test set: 50 LLM-generated questions
-(gemini-3.5-flash-lite) across 32 papers, one per sampled chunk, reviewed by hand; the source
-chunk is the gold label. Corpus: 49 arXiv papers on RAG and LLM agents → 1,681 chunks.
+**Chunk hit@5:** is the exact gold passage in the top 5?
+
+| Retriever | Original | Paraphrased | Average | p50 latency (T4) |
+|---|---|---|---|---|
+| Dense (bge-small embeddings) | 0.60 | 0.22 | 0.41 | 17 ms |
+| BM25 (keywords) | **0.88** | 0.26 | 0.57 | **5 ms** |
+| Hybrid, equal weights (RRF) | 0.72 | **0.50** | 0.61 | 27 ms |
+| **Hybrid, 80% BM25** (`hybrid@0.8`) | 0.82 | 0.46 | **0.64** | 28 ms |
+| BM25 → cross-encoder rerank | **0.88** | 0.44 | **0.66** | 818 ms |
+| Hybrid equal → rerank | 0.84 | _not run yet_ | | 878 ms |
+
+Full metrics (MRR, paper-level hit@5) in [`eval/RESULTS.md`](eval/RESULTS.md). Corpus: 49 arXiv
+papers on RAG and LLM agents → 1,681 chunks. With n = 50, the standard error of each hit rate is
+about ±0.07, so gaps under ~0.1 aren't meaningful; gaps like 0.26 → 0.50 are.
 
 ### What the numbers say
 
-1. **BM25 wins, at a third of dense's latency.** Research papers are full of exact, rare terms
-   (method names like "MAIN-RAG", dataset names, numbers) that keyword matching nails and a
-   small embedding model blurs together. Dense retrieval finds the right *paper* (0.94) but
-   often not the right *passage* (0.60).
-2. **Hybrid made things worse than BM25 alone (0.72 vs 0.88).** Equal-weight fusion lets the
-   weaker dense ranking push BM25's correct hits out of the top 5. Fusion pays off when the two
-   retrievers are similarly strong and make *different* mistakes, which isn't the case here.
-3. **The reranker recovers most of that loss and ranks best (MRR 0.73)**: when it finds the
-   passage, it puts it nearer the top. But it is ~30× slower than hybrid (878 vs 27 ms on a T4), which
-   matters for an interactive app.
-4. **Caveat: this test set favours keyword search.** The questions were written by an LLM
-   *looking at the passage*, so they reuse its exact wording. Real users paraphrase. The next
-   experiment re-runs everything on paraphrased questions to see whether dense and hybrid
-   close the gap when the wording doesn't match.
+1. **The "best" retriever depends on how people ask.** BM25 wins when the question shares the
+   passage's words (0.88) and collapses when it doesn't (0.26). Dense retrieval is weak on both
+   with this small embedding model.
+2. **Hybrid search pays off exactly when its parts make different mistakes.** On original
+   questions BM25 is right almost everywhere dense is, so equal fusion only adds dense's noise
+   (0.72 < 0.88). On paraphrased questions they fail on *different* questions, and fusion nearly
+   doubles either one alone (0.50 vs 0.26 / 0.22).
+3. **`hybrid@0.8` is the best fast all-rounder:** close to BM25 on easy questions, close to
+   equal hybrid on hard ones, with a 28 ms median latency. The weight was fixed *before* seeing
+   these results, not tuned on them. **It's now the default retriever.**
+4. **The reranker rescues keyword search on hard questions (0.26 → 0.44)** because it reads
+   meaning, but it can only reorder the candidates it's given: if BM25 never retrieved the gold
+   passage, reranking can't find it. And it costs about 30× the latency.
+5. **A subtle one: `hybrid@0.8-rerank` scored exactly the same as `bm25-rerank`.** At 80/20,
+   a passage found only by dense scores at most 0.2/61 ≈ 0.0033, while BM25's 30th result
+   scores 0.8/90 ≈ 0.0089. So the reranker's 30 candidates are always exactly BM25's: the
+   weighting silently removed dense from the candidate pool.
+
+### Next experiments
+- **Equal hybrid → rerank on paraphrased questions:** candidates from *both* retrievers should
+  beat 0.44, since the reranker would finally see dense's finds.
+- **A bigger embedding model** (bge-base / bge-large): dense is the weak link on both sets.
+- **Answer-quality evals:** faithfulness and citation accuracy with an LLM judge.
 
 ## Quickstart
 
@@ -111,7 +131,7 @@ notebooks/       Colab GPU quickstart
 - [x] Measure all retrievers on the test set (BM25 wins; see analysis above)
 - [x] Paraphrased test set + word-overlap measurement (`paraphrase-testset`)
 - [x] Weighted fusion (`hybrid@0.8`) and BM25 + rerank (`bm25-rerank`)
-- [ ] Results on both test sets
+- [x] Results on both test sets → `hybrid@0.8` is the default retriever
 - [ ] Answer quality evals (faithfulness and citation accuracy, LLM-as-judge)
 - [ ] Tracing and cost tracking (Langfuse)
 - [ ] Web UI + live deployment

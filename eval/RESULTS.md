@@ -1,6 +1,8 @@
 # Retrieval results
 
-Every row is one run of `arxiv-rag eval` on the same test set.
+Every row is one run of `arxiv-rag eval`. Rows without a tag use `eval/testset.jsonl`;
+rows tagged `[paraphrased]` use `eval/testset_paraphrased.jsonl` (same gold passages, reworded
+questions).
 
 | date (UTC) | experiment | n | chunk hit@5 | chunk MRR | paper hit@5 | paper MRR | p50 ms |
 |---|---|---|---|---|---|---|---|
@@ -9,3 +11,15 @@ Every row is one run of `arxiv-rag eval` on the same test set.
 | 2026-11-23 18:54 | bm25 | 50 | 0.88 | 0.7183 | 0.98 | 0.9433 | 5.2 |
 | 2026-11-23 18:54 | hybrid | 50 | 0.72 | 0.5883 | 0.96 | 0.94 | 26.7 |
 | 2026-11-23 18:56 | hybrid-rerank | 50 | 0.84 | 0.7273 | 0.98 | 0.9367 | 877.6 |
+| 2026-11-23 19:12 | dense | 50 | 0.6 | 0.422 | 0.94 | 0.8807 | 16.9 |
+| 2026-11-23 19:12 | bm25 | 50 | 0.88 | 0.7183 | 0.98 | 0.9433 | 5.6 |
+| 2026-11-23 19:12 | hybrid | 50 | 0.72 | 0.5883 | 0.96 | 0.94 | 27.0 |
+| 2026-11-23 19:12 | hybrid@0.8 | 50 | 0.82 | 0.6697 | 0.98 | 0.9367 | 27.5 |
+| 2026-11-23 19:12 | bm25-rerank | 50 | 0.88 | 0.7597 | 0.98 | 0.96 | 817.8 |
+| 2026-11-23 19:13 | hybrid@0.8-rerank | 50 | 0.88 | 0.7597 | 0.98 | 0.96 | 909.7 |
+| 2026-11-23 19:14 | dense [paraphrased] | 50 | 0.22 | 0.1263 | 0.66 | 0.5633 | 43.9 |
+| 2026-11-23 19:14 | bm25 [paraphrased] | 50 | 0.26 | 0.1583 | 0.62 | 0.4467 | 11.4 |
+| 2026-11-23 19:14 | hybrid [paraphrased] | 50 | 0.5 | 0.2837 | 0.8 | 0.6507 | 32.7 |
+| 2026-11-23 19:14 | hybrid@0.8 [paraphrased] | 50 | 0.46 | 0.2623 | 0.8 | 0.633 | 33.0 |
+| 2026-11-23 19:14 | bm25-rerank [paraphrased] | 50 | 0.44 | 0.2863 | 0.72 | 0.544 | 876.4 |
+| 2026-11-23 19:15 | hybrid@0.8-rerank [paraphrased] | 50 | 0.44 | 0.2863 | 0.72 | 0.544 | 929.7 |

@@ -26,8 +26,8 @@ class Settings:
     collection: str = field(default_factory=lambda: _env("COLLECTION", "arxiv_chunks"))
     chunk_size: int = field(default_factory=lambda: int(_env("CHUNK_SIZE", "300")))
     chunk_overlap: int = field(default_factory=lambda: int(_env("CHUNK_OVERLAP", "50")))
-    # dense | bm25 | hybrid | hybrid-rerank
-    retriever: str = field(default_factory=lambda: _env("RETRIEVER", "dense"))
+    # dense | bm25 | hybrid[@bm25_weight], optionally + "-rerank" (see README results)
+    retriever: str = field(default_factory=lambda: _env("RETRIEVER", "hybrid@0.8"))
     reranker_model: str = field(
         default_factory=lambda: _env("RERANKER_MODEL", "BAAI/bge-reranker-base")
     )
