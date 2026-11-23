@@ -1,0 +1,3 @@
+# Used by Streamlit Community Cloud to install the demo (streamlit_app.py).
+# Local development: pip install -e ".[all,demo,dev]"
+.[ingest,llm,demo]

@@ -5,7 +5,7 @@
 [![CI](https://github.com/Sagar00789/arxiv-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/Sagar00789/arxiv-rag/actions/workflows/ci.yml)
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sagar00789/arxiv-rag/blob/main/notebooks/colab_quickstart.ipynb)
 
-**Live demo:** _deploying to Hugging Face Spaces (link coming)_
+**Live demo:** _deploying to Streamlit Community Cloud (link coming)_
 
 A retrieval-augmented generation (RAG) system over arXiv papers on RAG and LLM agents.
 The focus is less on "it works" and more on **how well it works and why**: each improvement
@@ -134,7 +134,7 @@ arxiv-rag eval -r bm25 -r hybrid@0.8 -r bm25-rerank --testset eval/testset_parap
 arxiv-rag index -e BAAI/bge-base-en-v1.5    # another embedding model, its own collection
 arxiv-rag eval -r dense -e BAAI/bge-small-en-v1.5 -e BAAI/bge-base-en-v1.5
 arxiv-rag eval-answers -r hybrid@0.8 --n 25 --judge-model gemini/gemini-3.8-flash
-arxiv-rag ui                      # web demo at http://localhost:7860 (pip install -e ".[ui]")
+arxiv-rag ui                      # web demo at http://localhost:8501 (pip install -e ".[all,demo]")
 uvicorn arxiv_rag.api:app --reload  # POST /ask at http://localhost:8000/docs
 ```
 
@@ -148,6 +148,11 @@ uvicorn arxiv_rag.api:app --reload  # POST /ask at http://localhost:8000/docs
   BM25 and cosine scores (on totally different scales) never need tuning against each other.
 - **Rerank only a shortlist:** the cross-encoder is far more accurate but about 100× slower per
   passage than an embedding lookup, so it re-scores just the top 30 hybrid candidates.
+- **A demo that fits free hosting:** free tiers give about 1 GB of RAM, and PyTorch alone would
+  take most of it. The demo runs the same `bge-small` model through FastEmbed (ONNX Runtime,
+  quantized, 67 MB), builds its index in memory from the committed paper list on first start,
+  and drops the cross-encoder. Its vectors differ slightly from the PyTorch ones, so the two are
+  kept in separate collections and all reported results use PyTorch.
 - **Offline tests:** a hashing embedder and in-memory Qdrant let CI run in seconds with no keys.
 
 ## Project layout
@@ -165,10 +170,11 @@ src/arxiv_rag/
   pipeline.py    retrieval + generation
   api.py         FastAPI service
   cli.py         `arxiv-rag` command
-  ui.py          Gradio web demo
+  demo.py        builds the hosted demo in memory (FastEmbed/ONNX, no PyTorch)
+  ui.py          web demo helpers (answer + source formatting)
 tests/           offline unit tests
 notebooks/       Colab GPU quickstart
-space/           Hugging Face Spaces image; .github/workflows/deploy-space.yml deploys it
+streamlit_app.py web demo (Streamlit Community Cloud installs it from requirements.txt)
 eval/            test sets, results logs, and the arXiv IDs of the corpus
 ```
 
@@ -186,5 +192,5 @@ eval/            test sets, results logs, and the arXiv IDs of the corpus
 - [x] Multiple embedding models side by side (helps only on paraphrased questions)
 - [ ] Answer-quality results
 - [ ] Tracing and cost tracking (Langfuse)
-- [x] Web UI (Gradio) + auto-deploy to Hugging Face Spaces
+- [x] Web demo (Streamlit) that fits free hosting: FastEmbed (ONNX) instead of PyTorch
 - [ ] Live demo link

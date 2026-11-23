@@ -11,3 +11,7 @@ venv/
 data/
 qdrant_data/
 eval/results/*.json
+
+# demo data (rebuilt on start)
+demo_data/
+.streamlit/secrets.toml

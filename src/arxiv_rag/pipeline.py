@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import functools
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import Settings
 from .generate import generate_answer
-from .retrieve import Hit, Retriever
+from .retrieve import Hit, Retriever, Scorer
 
 RETRIEVERS = ("dense", "bm25", "hybrid", "hybrid-rerank", "bm25-rerank")
 # Names: <dense|bm25|hybrid>[@<bm25 weight>][-rerank], e.g. "hybrid@0.8", "hybrid@0.8-rerank"
@@ -32,13 +33,15 @@ class IndexMissingError(RuntimeError):
 
 
 @functools.cache
-def _dense(embed_model: str, qdrant_path: str, collection: str) -> Retriever:
+def _dense(
+    embed_model: str, qdrant_path: str, collection: str, backend: str = "sentence-transformers"
+) -> Retriever:
     # Cached: embedded Qdrant locks its folder, so open it once per process.
-    from .embed import SentenceTransformerEmbedder
+    from .embed import make_embedder
     from .retrieve import DenseRetriever
     from .store import VectorStore
 
-    embedder = SentenceTransformerEmbedder(embed_model)
+    embedder = make_embedder(embed_model, backend)
     store = VectorStore(qdrant_path, collection, embedder.dim)
     if not store.exists() or store.count() == 0:
         raise IndexMissingError(
@@ -63,20 +66,34 @@ def _bm25(chunks_path: str) -> Retriever:
     return BM25Retriever(load_chunks(Path(chunks_path)))
 
 
-def build_retriever(s: Settings, name: str) -> Retriever:
-    """Build a retriever by name. Heavy pieces are only loaded when that name needs them."""
+def assemble_retriever(
+    name: str,
+    dense: Callable[[], Retriever],
+    bm25: Callable[[], Retriever],
+    scorer: Callable[[], Scorer],
+) -> Retriever:
+    """Build a named retriever from its parts. Parts are factories, so only what the name
+    needs gets loaded."""
     from .retrieve import HybridRetriever, RerankRetriever
 
     base, w, rerank = parse_retriever(name)
-
     if base == "dense":
-        r: Retriever = _dense(s.embed_model, s.qdrant_path, s.dense_collection)
+        r = dense()
     elif base == "bm25":
-        r = _bm25(str(s.chunks_path))
+        r = bm25()
     else:
-        dense = _dense(s.embed_model, s.qdrant_path, s.dense_collection)
-        r = HybridRetriever([dense, _bm25(str(s.chunks_path))], weights=[1 - w, w])
-    return RerankRetriever(r, _cross_encoder(s.reranker_model)) if rerank else r
+        r = HybridRetriever([dense(), bm25()], weights=[1 - w, w])
+    return RerankRetriever(r, scorer()) if rerank else r
+
+
+def build_retriever(s: Settings, name: str) -> Retriever:
+    """Build a retriever by name from the on-disk index."""
+    return assemble_retriever(
+        name,
+        dense=lambda: _dense(s.embed_model, s.qdrant_path, s.dense_collection, s.embed_backend),
+        bm25=lambda: _bm25(str(s.chunks_path)),
+        scorer=lambda: _cross_encoder(s.reranker_model),
+    )
 
 
 @dataclass

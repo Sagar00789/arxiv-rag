@@ -30,6 +30,10 @@ class Settings:
         default_factory=lambda: _env("LLM_MODEL", "gemini/gemini-3.5-flash-lite")
     )
     embed_model: str = field(default_factory=lambda: _env("EMBED_MODEL", DEFAULT_EMBED_MODEL))
+    # sentence-transformers (PyTorch, used for all results) | fastembed (ONNX, used by the demo)
+    embed_backend: str = field(
+        default_factory=lambda: _env("EMBED_BACKEND", "sentence-transformers")
+    )
     data_dir: Path = field(default_factory=lambda: Path(_env("DATA_DIR", "data")))
     qdrant_path: str = field(default_factory=lambda: _env("QDRANT_PATH", "qdrant_data"))
     collection: str = field(default_factory=lambda: _env("COLLECTION", "arxiv_chunks"))
@@ -46,10 +50,11 @@ class Settings:
     def dense_collection(self) -> str:
         """One Qdrant collection per embedding model, so several can be compared side by side.
         The default model keeps the plain name, so existing indexes keep working."""
+        suffix = "__fastembed" if self.embed_backend == "fastembed" else ""
         if self.embed_model == DEFAULT_EMBED_MODEL:
-            return self.collection
+            return self.collection + suffix
         slug = re.sub(r"[^a-z0-9]+", "-", model_short_name(self.embed_model).lower()).strip("-")
-        return f"{self.collection}__{slug}"
+        return f"{self.collection}__{slug}{suffix}"
 
     @property
     def chunks_path(self) -> Path:

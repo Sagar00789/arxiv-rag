@@ -84,7 +84,7 @@ def _with_models(s: Settings, models: list[str] | None) -> list[Settings]:
 def index(embed_model: list[str] = typer.Option(None, "--embed-model", "-e", help=EMBED_HELP)):
     """Embed all chunks and (re)build the vector index, one collection per embedding model."""
     from .chunking import load_chunks
-    from .embed import SentenceTransformerEmbedder
+    from .embed import make_embedder
     from .retrieve import index_chunks
     from .store import VectorStore
 
@@ -95,7 +95,7 @@ def index(embed_model: list[str] = typer.Option(None, "--embed-model", "-e", hel
         raise typer.Exit(1)
     for s in _with_models(base, embed_model):
         t0 = time.perf_counter()
-        embedder = SentenceTransformerEmbedder(s.embed_model)
+        embedder = make_embedder(s.embed_model, s.embed_backend)
         store = VectorStore(s.qdrant_path, s.dense_collection, embedder.dim)
         n = index_chunks(chunks, embedder, store)
         typer.secho(
@@ -308,14 +308,14 @@ def ask(
 
 
 @app.command()
-def ui(
-    host: str = typer.Option("127.0.0.1", help="0.0.0.0 to accept outside connections"),
-    port: int = typer.Option(7860),
-):
-    """Launch the web demo (needs the `ui` extra: pip install -e ".[ui]")."""
-    from .ui import main
+def ui(port: int = typer.Option(8501)):
+    """Launch the web demo locally (needs the `demo` extra: pip install -e ".[all,demo]")."""
+    import subprocess
+    import sys
 
-    main(host=host, port=port)
+    app_path = Path(__file__).resolve().parents[2] / "streamlit_app.py"
+    cmd = [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port)]
+    raise typer.Exit(subprocess.call(cmd))
 
 
 if __name__ == "__main__":

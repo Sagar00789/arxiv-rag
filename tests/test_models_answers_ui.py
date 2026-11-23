@@ -1,4 +1,4 @@
-"""Multiple embedding models, answer-quality eval, exact-ID ingest and the web UI."""
+"""Multiple embedding models, answer-quality eval, exact-ID ingest and the web UI helpers."""
 
 import dataclasses
 import json
@@ -43,7 +43,7 @@ def test_eval_compares_embedding_models(tmp_path, monkeypatch, retriever):
     save_testset([TestItem("low rank adapters", "p3", "p3::0")], tmp_path / "eval/testset.jsonl")
     seen = []
 
-    def fake_dense(model, path, collection):
+    def fake_dense(model, path, collection, backend="sentence-transformers"):
         seen.append((model, collection))
         return retriever
 
@@ -168,8 +168,3 @@ def test_ui_results_tab_reads_readme(tmp_path):
     readme.write_text("# x\n## Results\n| a | b |\n## Quickstart\n")
     assert ui.results_markdown(readme).startswith("## Results")
     assert "GitHub" in ui.results_markdown(tmp_path / "missing.md")
-
-
-def test_ui_builds(fake_pipe):
-    pytest.importorskip("gradio")
-    assert ui.build_app(lambda r: fake_pipe) is not None

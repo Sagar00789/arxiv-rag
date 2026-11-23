@@ -1,4 +1,4 @@
-"""Web demo (Gradio). Run locally with `arxiv-rag ui`; deployed to Hugging Face Spaces."""
+"""Framework-free helpers for the web demo (streamlit_app.py), kept here so they can be tested."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from .config import Settings
 from .pipeline import Answer, RAGPipeline
 
 REPO_URL = "https://github.com/Sagar00789/arxiv-rag"
@@ -17,7 +16,6 @@ RETRIEVER_CHOICES = [
     ("BM25 keywords only (fastest)", "bm25"),
     ("Dense embeddings only", "dense"),
     ("Hybrid, equal weights", "hybrid"),
-    ("Hybrid + cross-encoder rerank (slow on CPU)", "hybrid@0.8-rerank"),
 ]
 
 EXAMPLES = [
@@ -28,18 +26,6 @@ EXAMPLES = [
 ]
 
 PipelineFactory = Callable[[str], RAGPipeline]
-
-
-def default_factory() -> PipelineFactory:
-    cache: dict[str, RAGPipeline] = {}
-    settings = Settings()
-
-    def get(retriever: str) -> RAGPipeline:
-        if retriever not in cache:
-            cache[retriever] = RAGPipeline.from_settings(settings, retriever=retriever)
-        return cache[retriever]
-
-    return get
 
 
 def format_sources(ans: Answer) -> str:
@@ -86,40 +72,3 @@ def results_markdown(readme: Path = Path("README.md")) -> str:
         return text[start:end]
     except (OSError, ValueError):
         return f"See the evaluation results in the [GitHub repo]({REPO_URL})."
-
-
-def build_app(factory: PipelineFactory | None = None):
-    import gradio as gr
-
-    factory = factory or default_factory()
-
-    with gr.Blocks(title="arxiv-rag: cited answers from AI research papers") as app:
-        gr.Markdown(
-            "# arxiv-rag\n"
-            "Ask about **retrieval-augmented generation and LLM agents**. Answers come only from "
-            "49 arXiv papers and cite the passages they use. "
-            f"[Code, tests and evaluation on GitHub]({REPO_URL})."
-        )
-        with gr.Tab("Ask"):
-            question = gr.Textbox(
-                label="Question", placeholder="e.g. How does Self-RAG decide when to retrieve?"
-            )
-            retriever = gr.Dropdown(RETRIEVER_CHOICES, value="hybrid@0.8", label="Retriever")
-            ask = gr.Button("Ask", variant="primary")
-            answer = gr.Markdown(label="Answer")
-            gr.Markdown("### Sources")
-            sources = gr.Markdown()
-            gr.Examples(EXAMPLES, inputs=question)
-
-            def run(q: str, r: str) -> tuple[str, str]:
-                return answer_question(q, r, factory)
-
-            ask.click(run, [question, retriever], [answer, sources])
-            question.submit(run, [question, retriever], [answer, sources])
-        with gr.Tab("How well does it work?"):
-            gr.Markdown(results_markdown())
-    return app
-
-
-def main(host: str = "127.0.0.1", port: int = 7860) -> None:
-    build_app().launch(server_name=host, server_port=port)
