@@ -27,6 +27,10 @@ def parse_retriever(name: str) -> tuple[str, float, bool]:
     return m.group(1), float(m.group(2) or 0.5), bool(m.group(3))
 
 
+class IndexMissingError(RuntimeError):
+    pass
+
+
 @functools.cache
 def _dense(embed_model: str, qdrant_path: str, collection: str) -> Retriever:
     # Cached: embedded Qdrant locks its folder, so open it once per process.
@@ -35,7 +39,13 @@ def _dense(embed_model: str, qdrant_path: str, collection: str) -> Retriever:
     from .store import VectorStore
 
     embedder = SentenceTransformerEmbedder(embed_model)
-    return DenseRetriever(embedder, VectorStore(qdrant_path, collection, embedder.dim))
+    store = VectorStore(qdrant_path, collection, embedder.dim)
+    if not store.exists() or store.count() == 0:
+        raise IndexMissingError(
+            f"No index for embedding model {embed_model} (collection '{collection}'). "
+            f"Run: arxiv-rag index --embed-model {embed_model}"
+        )
+    return DenseRetriever(embedder, store)
 
 
 @functools.cache
@@ -60,11 +70,11 @@ def build_retriever(s: Settings, name: str) -> Retriever:
     base, w, rerank = parse_retriever(name)
 
     if base == "dense":
-        r: Retriever = _dense(s.embed_model, s.qdrant_path, s.collection)
+        r: Retriever = _dense(s.embed_model, s.qdrant_path, s.dense_collection)
     elif base == "bm25":
         r = _bm25(str(s.chunks_path))
     else:
-        dense = _dense(s.embed_model, s.qdrant_path, s.collection)
+        dense = _dense(s.embed_model, s.qdrant_path, s.dense_collection)
         r = HybridRetriever([dense, _bm25(str(s.chunks_path))], weights=[1 - w, w])
     return RerankRetriever(r, _cross_encoder(s.reranker_model)) if rerank else r
 

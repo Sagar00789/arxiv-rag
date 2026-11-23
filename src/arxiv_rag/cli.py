@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import logging
+import time
 from pathlib import Path
 
 import typer
@@ -23,11 +25,15 @@ def friendly_errors(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         from .generate import LLMError
+        from .pipeline import IndexMissingError
 
         try:
             return fn(*args, **kwargs)
         except LLMError as e:
             typer.secho(f"LLM error: {e}", fg="red", err=True)
+            raise typer.Exit(1) from None
+        except IndexMissingError as e:
+            typer.secho(str(e), fg="red", err=True)
             raise typer.Exit(1) from None
 
     return wrapper
@@ -40,31 +46,63 @@ DEFAULT_QUERY = 'abs:"retrieval-augmented generation" OR abs:"LLM agents"'
 def ingest(
     query: str = typer.Option(DEFAULT_QUERY, help="arXiv search query"),
     max_results: int = typer.Option(50, help="Number of papers to download"),
+    ids_file: Path = typer.Option(
+        None, help="File of exact arXiv IDs to fetch instead of searching (e.g. eval/paper_ids.txt)"
+    ),
 ):
     """Download papers from arXiv and chunk them into data/chunks.jsonl."""
-    from .ingest import build_corpus
+    from .ingest import build_corpus, read_id_list
 
     s = Settings()
-    n_papers, n_chunks = build_corpus(query, max_results, s.data_dir, s.chunk_size, s.chunk_overlap)
+    ids = read_id_list(ids_file) if ids_file else None
+    n_papers, n_chunks = build_corpus(
+        query, max_results, s.data_dir, s.chunk_size, s.chunk_overlap, id_list=ids
+    )
     typer.echo(f"{n_papers} papers -> {n_chunks} chunks in {s.chunks_path}")
 
 
+EMBED_HELP = "Embedding model(s), e.g. BAAI/bge-base-en-v1.5 (repeatable; default EMBED_MODEL)"
+
+
+def _check_retrievers(names: list[str]) -> None:
+    """Fail fast on a typo, before loading any model."""
+    from .pipeline import parse_retriever
+
+    for r in names:
+        try:
+            parse_retriever(r)
+        except ValueError as e:
+            typer.secho(str(e), fg="red", err=True)
+            raise typer.Exit(1) from None
+
+
+def _with_models(s: Settings, models: list[str] | None) -> list[Settings]:
+    return [dataclasses.replace(s, embed_model=m) for m in models] if models else [s]
+
+
 @app.command()
-def index():
-    """Embed all chunks and (re)build the vector index."""
+def index(embed_model: list[str] = typer.Option(None, "--embed-model", "-e", help=EMBED_HELP)):
+    """Embed all chunks and (re)build the vector index, one collection per embedding model."""
     from .chunking import load_chunks
     from .embed import SentenceTransformerEmbedder
     from .retrieve import index_chunks
     from .store import VectorStore
 
-    s = Settings()
-    chunks = load_chunks(s.chunks_path) if s.chunks_path.exists() else []
+    base = Settings()
+    chunks = load_chunks(base.chunks_path) if base.chunks_path.exists() else []
     if not chunks:
-        typer.echo(f"No chunks in {s.chunks_path}. Run `arxiv-rag ingest` first.", err=True)
+        typer.echo(f"No chunks in {base.chunks_path}. Run `arxiv-rag ingest` first.", err=True)
         raise typer.Exit(1)
-    embedder = SentenceTransformerEmbedder(s.embed_model)
-    store = VectorStore(s.qdrant_path, s.collection, embedder.dim)
-    typer.echo(f"Indexed {index_chunks(chunks, embedder, store)} chunks with {s.embed_model}")
+    for s in _with_models(base, embed_model):
+        t0 = time.perf_counter()
+        embedder = SentenceTransformerEmbedder(s.embed_model)
+        store = VectorStore(s.qdrant_path, s.dense_collection, embedder.dim)
+        n = index_chunks(chunks, embedder, store)
+        typer.secho(
+            f"Indexed {n} chunks with {s.embed_model} ({embedder.dim} dims) "
+            f"into '{s.dense_collection}' in {time.perf_counter() - t0:.0f}s",
+            fg="green",
+        )
 
 
 @app.command("check-llm")
@@ -141,6 +179,7 @@ def paraphrase_testset_cmd(
 
 
 @app.command("eval")
+@friendly_errors
 def eval_cmd(
     retriever: list[str] = typer.Option(
         None,
@@ -148,11 +187,12 @@ def eval_cmd(
         "-r",
         help="dense | bm25 | hybrid[@w] | any of these + '-rerank' (repeatable)",
     ),
+    embed_model: list[str] = typer.Option(None, "--embed-model", "-e", help=EMBED_HELP),
     name: str = typer.Option(None, help="Experiment name (default: the retriever name)"),
     testset: Path = typer.Option(Path("eval/testset.jsonl")),
     k: int = typer.Option(5),
 ):
-    """Score retrieval on the test set and append a row per retriever to eval/RESULTS.md."""
+    """Score retrieval on the test set: one row per (embedding model, retriever) in RESULTS.md."""
     from .chunking import load_chunks
     from .evaluation import evaluate_retrieval, load_testset, mean_overlap, record_results
     from .pipeline import build_retriever, parse_retriever
@@ -163,29 +203,90 @@ def eval_cmd(
         raise typer.Exit(1)
     s = Settings()
     names = retriever or [s.retriever]
-    for r in names:  # fail fast on a typo, before loading any model
-        try:
-            parse_retriever(r)
-        except ValueError as e:
-            typer.secho(str(e), fg="red", err=True)
-            raise typer.Exit(1) from None
+    _check_retrievers(names)
 
     label = testset.stem.removeprefix("testset").strip("_-")  # "" or e.g. "paraphrased"
     chunks = {c.chunk_id: c for c in load_chunks(s.chunks_path)} if s.chunks_path.exists() else {}
     overlap = mean_overlap(items, chunks)
     typer.echo(f"Test set {testset}: {len(items)} questions, word overlap {overlap}")
-    for r in names:
-        results = evaluate_retrieval(build_retriever(s, r), items, k=k)
+    from .config import DEFAULT_EMBED_MODEL, model_short_name
+
+    runs = [(sm, r) for sm in _with_models(s, embed_model) for r in names]
+    for sm, r in runs:
+        uses_dense = parse_retriever(r)[0] != "bm25"
+        if not uses_dense and sm.embed_model != (embed_model or [s.embed_model])[0]:
+            continue  # bm25 doesn't depend on the embedding model; score it once
+        results = evaluate_retrieval(build_retriever(sm, r), items, k=k)
         results["word_overlap"] = overlap
-        exp = name if name and len(names) == 1 else r
+        results["embed_model"] = sm.embed_model if uses_dense else None
+        exp = name if name and len(runs) == 1 else r
+        if uses_dense and sm.embed_model != DEFAULT_EMBED_MODEL:
+            exp = f"{exp} · {model_short_name(sm.embed_model)}"
         if label:
             exp = f"{exp} [{label}]"
         record_results(results, exp, testset.parent)
         summary = "  ".join(
-            f"{key}={v}" for key, v in results.items() if key not in ("n", "k", "word_overlap")
+            f"{key}={v}"
+            for key, v in results.items()
+            if key not in ("n", "k", "word_overlap", "embed_model")
         )
-        typer.secho(f"{exp:>32}: {summary}", fg="green")
+        typer.secho(f"{exp:>44}: {summary}", fg="green")
     typer.echo(f"Logged to {testset.parent / 'RESULTS.md'}")
+
+
+@app.command("eval-answers")
+@friendly_errors
+def eval_answers_cmd(
+    retriever: str = typer.Option(None, "--retriever", "-r", help="Default: RETRIEVER"),
+    embed_model: str = typer.Option(None, "--embed-model", "-e", help="Default: EMBED_MODEL"),
+    testset: Path = typer.Option(Path("eval/testset.jsonl")),
+    n: int = typer.Option(25, help="Questions to grade (2 LLM calls each)"),
+    judge_model: str = typer.Option(
+        None, help="LLM used as judge (default: LLM_MODEL; a different model avoids self-grading)"
+    ),
+    rpm: float = typer.Option(12, help="Max LLM requests per minute"),
+    k: int = typer.Option(5),
+):
+    """Answer test questions and grade them with an LLM judge (resumable)."""
+    import re as _re
+
+    from .answer_eval import evaluate_answers, record_answer_results, summarize
+    from .config import DEFAULT_EMBED_MODEL, model_short_name
+    from .evaluation import load_testset
+    from .generate import LLMError, set_rate_limit
+    from .pipeline import build_retriever, parse_retriever
+
+    s = _with_models(Settings(), [embed_model] if embed_model else None)[0]
+    r = retriever or s.retriever
+    _check_retrievers([r])
+    items = load_testset(testset)[:n]
+    judge = judge_model or s.llm_model
+
+    exp = r
+    if parse_retriever(r)[0] != "bm25" and s.embed_model != DEFAULT_EMBED_MODEL:
+        exp += f" · {model_short_name(s.embed_model)}"
+    label = testset.stem.removeprefix("testset").strip("_-")
+    if label:
+        exp += f" [{label}]"
+    slug = _re.sub(r"[^\w.@-]+", "_", exp).strip("_")
+    log_path = testset.parent / "answers" / f"{slug}.jsonl"
+
+    if judge == s.llm_model:
+        typer.secho(
+            f"Note: {judge} is grading its own answers. Pass --judge-model to use a different one.",
+            fg="yellow",
+        )
+    set_rate_limit(rpm)
+    try:
+        judged = evaluate_answers(build_retriever(s, r), items, s.llm_model, judge, log_path, k)
+    except LLMError:
+        typer.echo(f"Progress saved in {log_path}. Re-run the same command to continue.")
+        raise
+    summary = summarize(judged)
+    record_answer_results(summary, exp, testset.parent)
+    for key, v in summary.items():
+        typer.secho(f"{key:>32}: {v}", fg="green")
+    typer.echo(f"Details: {log_path}   Summary: {testset.parent / 'ANSWERS.md'}")
 
 
 @app.command()
@@ -194,14 +295,27 @@ def ask(
     question: str,
     k: int = typer.Option(5),
     retriever: str = typer.Option(None, "--retriever", "-r", help="Override RETRIEVER"),
+    embed_model: str = typer.Option(None, "--embed-model", "-e", help="Override EMBED_MODEL"),
 ):
     """Ask a question and print the cited answer."""
     from .pipeline import RAGPipeline
 
-    ans = RAGPipeline.from_settings(retriever=retriever).ask(question, k)
+    s = _with_models(Settings(), [embed_model] if embed_model else None)[0]
+    ans = RAGPipeline.from_settings(s, retriever=retriever).ask(question, k)
     typer.echo(ans.answer + "\n\nSources:")
     for i, h in enumerate(ans.sources, start=1):
         typer.echo(f"  [{i}] {h.chunk.title} (arXiv:{h.chunk.paper_id}) score={h.score:.3f}")
+
+
+@app.command()
+def ui(
+    host: str = typer.Option("127.0.0.1", help="0.0.0.0 to accept outside connections"),
+    port: int = typer.Option(7860),
+):
+    """Launch the web demo (needs the `ui` extra: pip install -e ".[ui]")."""
+    from .ui import main
+
+    main(host=host, port=port)
 
 
 if __name__ == "__main__":

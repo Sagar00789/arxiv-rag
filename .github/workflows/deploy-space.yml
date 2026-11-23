@@ -1,0 +1,65 @@
+name: Deploy demo to Hugging Face Spaces
+
+# Runs after every push to main once these are set in the GitHub repo
+# (Settings -> Secrets and variables -> Actions):
+#   secret   HF_TOKEN        Hugging Face access token with write permission
+#   secret   GEMINI_API_KEY  copied into the Space as a secret (optional if set on HF directly)
+#   variable HF_SPACE        e.g. your-hf-username/arxiv-rag
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_SPACE: ${{ vars.HF_SPACE }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Skip if not configured
+        id: check
+        run: |
+          if [ -z "$HF_TOKEN" ] || [ -z "$HF_SPACE" ]; then
+            echo "HF_TOKEN secret or HF_SPACE variable not set; skipping deploy."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.enabled == 'true'
+
+      - name: Assemble the Space
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          mkdir -p /tmp/space/eval /tmp/space/space
+          cp -r pyproject.toml src /tmp/space/
+          cp space/Dockerfile /tmp/space/Dockerfile
+          cp space/start.sh /tmp/space/space/start.sh
+          cp eval/paper_ids.txt /tmp/space/eval/
+          cat space/README_SPACE_HEADER.md README.md > /tmp/space/README.md
+
+      - name: Upload to Hugging Face
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          pip install -q huggingface_hub
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["HF_SPACE"]
+          api.create_repo(space, repo_type="space", space_sdk="docker", exist_ok=True)
+          if os.environ.get("GEMINI_API_KEY"):
+              api.add_space_secret(space, "GEMINI_API_KEY", os.environ["GEMINI_API_KEY"])
+          api.upload_folder(
+              folder_path="/tmp/space",
+              repo_id=space,
+              repo_type="space",
+              commit_message=f"Deploy {os.environ.get('GITHUB_SHA', '')[:7]}",
+              delete_patterns=["*"],
+          )
+          print(f"Deployed: https://huggingface.co/spaces/{space}")
+          PY

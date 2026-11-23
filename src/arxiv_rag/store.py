@@ -11,6 +11,20 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 
 from .chunking import Chunk
 
+_clients: dict[str, QdrantClient] = {}
+
+
+def get_client(path: str) -> QdrantClient:
+    """One client per storage folder: embedded Qdrant locks its folder, so every collection
+    in it must share a client."""
+    if path == ":memory:":
+        return QdrantClient(location=":memory:")
+    if path not in _clients:
+        _clients[path] = QdrantClient(path=path)
+        # Close cleanly before interpreter shutdown (avoids a noisy warning from __del__).
+        atexit.register(_clients[path].close)
+    return _clients[path]
+
 
 def _point_id(chunk_id: str) -> str:
     # Qdrant needs UUID or int ids; derive a stable UUID from our string id.
@@ -19,13 +33,9 @@ def _point_id(chunk_id: str) -> str:
 
 class VectorStore:
     def __init__(self, path: str, collection: str, dim: int):
-        self.client = (
-            QdrantClient(location=":memory:") if path == ":memory:" else QdrantClient(path=path)
-        )
+        self.client = get_client(path)
         self.collection = collection
         self.dim = dim
-        # Close cleanly before interpreter shutdown (avoids a noisy warning from __del__).
-        atexit.register(self.client.close)
 
     def reset(self) -> None:
         if self.client.collection_exists(self.collection):
@@ -47,6 +57,9 @@ class VectorStore:
     def search(self, vector: list[float], k: int) -> list[tuple[Chunk, float]]:
         res = self.client.query_points(self.collection, query=vector, limit=k, with_payload=True)
         return [(Chunk(**p.payload), p.score) for p in res.points]
+
+    def exists(self) -> bool:
+        return self.client.collection_exists(self.collection)
 
     def count(self) -> int:
         return self.client.count(self.collection).count

@@ -5,6 +5,8 @@
 [![CI](https://github.com/Sagar00789/arxiv-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/Sagar00789/arxiv-rag/actions/workflows/ci.yml)
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sagar00789/arxiv-rag/blob/main/notebooks/colab_quickstart.ipynb)
 
+**Live demo:** _deploying to Hugging Face Spaces (link coming)_
+
 A retrieval-augmented generation (RAG) system over arXiv papers on RAG and LLM agents.
 The focus is less on "it works" and more on **how well it works and why**: each improvement
 (chunking, hybrid search, reranking) is scored on a fixed test set, and the results are
@@ -73,12 +75,23 @@ about ±0.07, so gaps under ~0.1 aren't meaningful; gaps like 0.26 → 0.50 are.
    scores 0.8/90 ≈ 0.0089. So the reranker's 30 candidates are always exactly BM25's: the
    weighting silently removed dense from the candidate pool.
 
+### Answer quality
+
+Retrieval metrics only say whether the right passage was *found*. `arxiv-rag eval-answers`
+also grades the final answers with an LLM judge (a different model from the one answering):
+
+- **Faithfulness:** share of the answer's claims supported by the passages it was given
+- **Citation accuracy:** share of `[n]` citations pointing at a passage that supports the sentence
+- **Correctness:** agreement with the reference answer (yes / partial / no)
+- **Correct when gold retrieved:** separates retrieval failures from generation failures
+
+_Results: running (see [`eval/ANSWERS.md`](eval/ANSWERS.md))._
+
 ### Next experiments
-- **A bigger embedding model** (bge-base / bge-large): dense is the weak link on both sets,
-  and the only component that could close the gap on paraphrased questions.
+- **Bigger embedding models** (bge-base / bge-large, now supported with `-e`): dense is the weak
+  link on both sets, and the only component that could close the gap on paraphrased questions.
 - **A stronger reranker** (e.g. bge-reranker-v2-m3) to test whether the reranker result is about
   this model or about reranking in general.
-- **Answer-quality evals:** faithfulness and citation accuracy with an LLM judge.
 
 ## Quickstart
 
@@ -88,13 +101,17 @@ about ±0.07, so gaps under ~0.1 aren't meaningful; gaps like 0.26 → 0.50 are.
 ```bash
 pip install -e ".[all,dev]"
 cp .env.example .env              # add a free Gemini or Groq key
-arxiv-rag ingest --max-results 50 # download and chunk papers
+arxiv-rag ingest --ids-file eval/paper_ids.txt  # the exact 49 papers behind the results
 arxiv-rag index                   # embed into Qdrant
 arxiv-rag ask "How does Self-RAG decide when to retrieve?"
 arxiv-rag make-testset --n 50     # then review eval/testset.jsonl
 arxiv-rag eval -r dense -r bm25 -r hybrid -r hybrid-rerank
 arxiv-rag paraphrase-testset      # questions reworded away from the passage's wording
 arxiv-rag eval -r bm25 -r hybrid@0.8 -r bm25-rerank --testset eval/testset_paraphrased.jsonl
+arxiv-rag index -e BAAI/bge-base-en-v1.5    # another embedding model, its own collection
+arxiv-rag eval -r dense -e BAAI/bge-small-en-v1.5 -e BAAI/bge-base-en-v1.5
+arxiv-rag eval-answers -r hybrid@0.8 --n 25 --judge-model gemini/gemini-3.8-flash
+arxiv-rag ui                      # web demo at http://localhost:7860 (pip install -e ".[ui]")
 uvicorn arxiv_rag.api:app --reload  # POST /ask at http://localhost:8000/docs
 ```
 
@@ -120,12 +137,16 @@ src/arxiv_rag/
   store.py       Qdrant wrapper
   retrieve.py    dense, BM25, hybrid (RRF) and reranking retrievers
   generate.py    cited-answer prompt, LLM call
-  evaluation.py  test-set generation, hit@k / MRR, results log
+  evaluation.py  test sets (generate, paraphrase), hit@k / MRR, word overlap, results log
+  answer_eval.py LLM-judge grading: faithfulness, citation accuracy, correctness
   pipeline.py    retrieval + generation
   api.py         FastAPI service
   cli.py         `arxiv-rag` command
+  ui.py          Gradio web demo
 tests/           offline unit tests
 notebooks/       Colab GPU quickstart
+space/           Hugging Face Spaces image; .github/workflows/deploy-space.yml deploys it
+eval/            test sets, results logs, and the arXiv IDs of the corpus
 ```
 
 ## Roadmap
@@ -138,6 +159,9 @@ notebooks/       Colab GPU quickstart
 - [x] Paraphrased test set + word-overlap measurement (`paraphrase-testset`)
 - [x] Weighted fusion (`hybrid@0.8`) and BM25 + rerank (`bm25-rerank`)
 - [x] Results on both test sets → `hybrid@0.8` is the default retriever
-- [ ] Answer quality evals (faithfulness and citation accuracy, LLM-as-judge)
+- [x] Answer-quality evals (faithfulness, citation accuracy, correctness; LLM-as-judge)
+- [x] Multiple embedding models side by side
+- [ ] Results for both of the above
 - [ ] Tracing and cost tracking (Langfuse)
-- [ ] Web UI + live deployment
+- [x] Web UI (Gradio) + auto-deploy to Hugging Face Spaces
+- [ ] Live demo link

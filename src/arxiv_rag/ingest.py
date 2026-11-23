@@ -36,15 +36,21 @@ def download_pdf(url: str, dest: Path, retries: int = 3, timeout: int = 60) -> N
             time.sleep(2**attempt)
 
 
-def fetch_papers(query: str, max_results: int, pdf_dir: Path) -> list[dict]:
-    """Search arXiv and download each result's PDF. Returns paper metadata."""
+def fetch_papers(
+    query: str, max_results: int, pdf_dir: Path, id_list: list[str] | None = None
+) -> list[dict]:
+    """Search arXiv (or fetch exact IDs) and download each PDF. Returns paper metadata."""
     import arxiv
 
     pdf_dir.mkdir(parents=True, exist_ok=True)
     client = arxiv.Client(page_size=50, delay_seconds=3, num_retries=3)
-    search = arxiv.Search(
-        query=query, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance
-    )
+    if id_list:
+        search = arxiv.Search(id_list=id_list, max_results=len(id_list))
+        max_results = len(id_list)
+    else:
+        search = arxiv.Search(
+            query=query, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance
+        )
     papers = []
     for r in client.results(search):
         paper_id = r.get_short_id()
@@ -81,11 +87,22 @@ def pdf_to_text(path: Path) -> str:
         return "\n".join(page.get_text() for page in doc)
 
 
+def read_id_list(path: Path) -> list[str]:
+    """One arXiv ID per line; blank lines and # comments ignored."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return [ln.split("#")[0].strip() for ln in lines if ln.split("#")[0].strip()]
+
+
 def build_corpus(
-    query: str, max_results: int, data_dir: Path, size: int, overlap: int
+    query: str,
+    max_results: int,
+    data_dir: Path,
+    size: int,
+    overlap: int,
+    id_list: list[str] | None = None,
 ) -> tuple[int, int]:
     """Fetch papers and write data/papers.jsonl and data/chunks.jsonl."""
-    papers = fetch_papers(query, max_results, data_dir / "pdfs")
+    papers = fetch_papers(query, max_results, data_dir / "pdfs", id_list=id_list)
     if not papers:
         raise RuntimeError("No papers were downloaded. Check the warnings above.")
     all_chunks: list[Chunk] = []
