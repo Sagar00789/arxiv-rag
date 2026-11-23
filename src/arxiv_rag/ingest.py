@@ -4,11 +4,36 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+import urllib.request
 from pathlib import Path
 
 from .chunking import Chunk, chunk_paper, save_chunks
 
 log = logging.getLogger(__name__)
+
+USER_AGENT = "arxiv-rag/0.1 (https://github.com/Sagar00789/arxiv-rag)"
+
+
+def download_pdf(url: str, dest: Path, retries: int = 3, timeout: int = 60) -> None:
+    """Download a PDF with retries. Rejects non-PDF responses (e.g. HTML error pages).
+
+    We do this ourselves because recent versions of the `arxiv` package removed
+    `Result.download_pdf()`.
+    """
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = resp.read()
+            if not data.startswith(b"%PDF"):
+                raise ValueError("response is not a PDF")
+            dest.write_bytes(data)
+            return
+        except Exception:
+            if attempt == retries:
+                raise
+            time.sleep(2**attempt)
 
 
 def fetch_papers(query: str, max_results: int, pdf_dir: Path) -> list[dict]:
@@ -26,11 +51,14 @@ def fetch_papers(query: str, max_results: int, pdf_dir: Path) -> list[dict]:
         filename = f"{paper_id.replace('/', '_')}.pdf"
         pdf_path = pdf_dir / filename
         if not pdf_path.exists():
+            url = getattr(r, "pdf_url", None) or f"https://arxiv.org/pdf/{paper_id}"
             try:
-                r.download_pdf(dirpath=str(pdf_dir), filename=filename)
+                download_pdf(url, pdf_path)
             except Exception as e:  # one bad PDF shouldn't stop the run
                 log.warning("Skipping %s: %s", paper_id, e)
                 continue
+            time.sleep(1)  # be polite to arxiv.org
+            log.info("Downloaded %s (%d/%d)", paper_id, len(papers) + 1, max_results)
         papers.append(
             {
                 "paper_id": paper_id,
@@ -57,6 +85,8 @@ def build_corpus(
 ) -> tuple[int, int]:
     """Fetch papers and write data/papers.jsonl and data/chunks.jsonl."""
     papers = fetch_papers(query, max_results, data_dir / "pdfs")
+    if not papers:
+        raise RuntimeError("No papers were downloaded. Check the warnings above.")
     all_chunks: list[Chunk] = []
     for p in papers:
         try:

@@ -21,7 +21,11 @@ class SentenceTransformerEmbedder:
         from sentence_transformers import SentenceTransformer
 
         self.model = SentenceTransformer(model_name, device=device)
-        self.dim = self.model.get_sentence_embedding_dimension()
+        # renamed in newer sentence-transformers; support both
+        if hasattr(self.model, "get_embedding_dimension"):
+            self.dim = self.model.get_embedding_dimension()
+        else:
+            self.dim = self.model.get_sentence_embedding_dimension()
         self.batch_size = batch_size
         self.query_prefix = BGE_QUERY_PREFIX if "bge" in model_name.lower() else ""
 

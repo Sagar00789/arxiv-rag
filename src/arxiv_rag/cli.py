@@ -11,6 +11,9 @@ from .config import Settings
 
 app = typer.Typer(add_completion=False, help="Q&A over arXiv papers, with retrieval evals.")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+# Hide per-request HTTP logs from HuggingFace / LiteLLM; keep our own progress logs.
+for _noisy in ("httpx", "httpcore", "huggingface_hub", "urllib3", "LiteLLM", "filelock"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 DEFAULT_QUERY = 'abs:"retrieval-augmented generation" OR abs:"LLM agents"'
 
@@ -37,7 +40,10 @@ def index():
     from .store import VectorStore
 
     s = Settings()
-    chunks = load_chunks(s.chunks_path)
+    chunks = load_chunks(s.chunks_path) if s.chunks_path.exists() else []
+    if not chunks:
+        typer.echo(f"No chunks in {s.chunks_path}. Run `arxiv-rag ingest` first.", err=True)
+        raise typer.Exit(1)
     embedder = SentenceTransformerEmbedder(s.embed_model)
     store = VectorStore(s.qdrant_path, s.collection, embedder.dim)
     typer.echo(f"Indexed {index_chunks(chunks, embedder, store)} chunks with {s.embed_model}")
@@ -53,7 +59,14 @@ def make_testset_cmd(
     from .evaluation import make_testset, save_testset
 
     s = Settings()
-    items = make_testset(load_chunks(s.chunks_path), n, s.llm_model)
+    chunks = load_chunks(s.chunks_path) if s.chunks_path.exists() else []
+    if not chunks:
+        typer.echo(f"No chunks in {s.chunks_path}. Run `arxiv-rag ingest` first.", err=True)
+        raise typer.Exit(1)
+    items = make_testset(chunks, n, s.llm_model)
+    if not items:
+        typer.echo("The LLM produced no usable questions. Check LLM_MODEL and API key.", err=True)
+        raise typer.Exit(1)
     save_testset(items, out)
     typer.echo(f"Wrote {len(items)} questions to {out}")
 
