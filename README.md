@@ -3,9 +3,11 @@
 **Ask questions about AI research papers and get cited answers, with every retrieval change measured.**
 
 [![CI](https://github.com/Sagar00789/arxiv-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/Sagar00789/arxiv-rag/actions/workflows/ci.yml)
+[![Live demo](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://arxiv-rag-yrmdlndnxrsroe66xownrs.streamlit.app/)
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sagar00789/arxiv-rag/blob/main/notebooks/colab_quickstart.ipynb)
 
-**Live demo:** _deploying to Streamlit Community Cloud (link coming)_
+**▶ [Try the live demo](https://arxiv-rag-yrmdlndnxrsroe66xownrs.streamlit.app/)**: ask a question, get a cited answer, open the source passages.
+_(Free hosting: if it has been idle, the first visit takes ~5 minutes to wake up.)_
 
 A retrieval-augmented generation (RAG) system over arXiv papers on RAG and LLM agents.
 The focus is less on "it works" and more on **how well it works and why**: each improvement
@@ -192,5 +194,4 @@ eval/            test sets, results logs, and the arXiv IDs of the corpus
 - [x] Multiple embedding models side by side (helps only on paraphrased questions)
 - [ ] Answer-quality results
 - [ ] Tracing and cost tracking (Langfuse)
-- [x] Web demo (Streamlit) that fits free hosting: FastEmbed (ONNX) instead of PyTorch
-- [ ] Live demo link
+- [x] [Live web demo](https://arxiv-rag-yrmdlndnxrsroe66xownrs.streamlit.app/) (Streamlit) that fits free hosting: FastEmbed (ONNX) instead of PyTorch
