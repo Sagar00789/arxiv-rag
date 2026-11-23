@@ -31,7 +31,8 @@ Two test sets with the **same 50 gold passages**, asked two ways:
   (keyword-friendly, the "easy" end).
 - **Paraphrased:** rewritten as someone who hasn't read the paper would ask: synonyms, and
   methods described instead of named. Only 11% of its words appear in the original questions
-  (the "hard" end). Real users sit somewhere in between.
+  (the "hard" end); on average 30% of a paraphrased question's words appear in its gold
+  passage. Real users sit somewhere in between.
 
 **Chunk hit@5:** is the exact gold passage in the top 5?
 
@@ -42,7 +43,7 @@ Two test sets with the **same 50 gold passages**, asked two ways:
 | Hybrid, equal weights (RRF) | 0.72 | **0.50** | 0.61 | 27 ms |
 | **Hybrid, 80% BM25** (`hybrid@0.8`) | 0.82 | 0.46 | **0.64** | 28 ms |
 | BM25 → cross-encoder rerank | **0.88** | 0.44 | **0.66** | 818 ms |
-| Hybrid equal → rerank | 0.84 | _not run yet_ | | 878 ms |
+| Hybrid equal → rerank | 0.84 | 0.42 | 0.63 | 878 ms |
 
 Full metrics (MRR, paper-level hit@5) in [`eval/RESULTS.md`](eval/RESULTS.md). Corpus: 49 arXiv
 papers on RAG and LLM agents → 1,681 chunks. With n = 50, the standard error of each hit rate is
@@ -60,18 +61,23 @@ about ±0.07, so gaps under ~0.1 aren't meaningful; gaps like 0.26 → 0.50 are.
 3. **`hybrid@0.8` is the best fast all-rounder:** close to BM25 on easy questions, close to
    equal hybrid on hard ones, with a 28 ms median latency. The weight was fixed *before* seeing
    these results, not tuned on them. **It's now the default retriever.**
-4. **The reranker rescues keyword search on hard questions (0.26 → 0.44)** because it reads
-   meaning, but it can only reorder the candidates it's given: if BM25 never retrieved the gold
-   passage, reranking can't find it. And it costs about 30× the latency.
+4. **The reranker helps on easy questions and doesn't help on hard ones.** It lifts hybrid from
+   0.72 to 0.84 on original questions, and rescues BM25 on paraphrased ones (0.26 → 0.44). But on
+   paraphrased questions it *lowers* equal hybrid from 0.50 to 0.42. I expected the opposite.
+   My reading: `bge-reranker-base` also leans on shared wording, and with method names stripped
+   out it promotes plausible-sounding passages from *other* papers (paper-level hit@5 drops
+   from 0.80 to 0.76). The gap is within noise, but there's clearly no gain to pay 30× latency
+   for. Reranking isn't a free upgrade: it has to be measured on the questions you actually expect.
 5. **A subtle one: `hybrid@0.8-rerank` scored exactly the same as `bm25-rerank`.** At 80/20,
    a passage found only by dense scores at most 0.2/61 ≈ 0.0033, while BM25's 30th result
    scores 0.8/90 ≈ 0.0089. So the reranker's 30 candidates are always exactly BM25's: the
    weighting silently removed dense from the candidate pool.
 
 ### Next experiments
-- **Equal hybrid → rerank on paraphrased questions:** candidates from *both* retrievers should
-  beat 0.44, since the reranker would finally see dense's finds.
-- **A bigger embedding model** (bge-base / bge-large): dense is the weak link on both sets.
+- **A bigger embedding model** (bge-base / bge-large): dense is the weak link on both sets,
+  and the only component that could close the gap on paraphrased questions.
+- **A stronger reranker** (e.g. bge-reranker-v2-m3) to test whether the reranker result is about
+  this model or about reranking in general.
 - **Answer-quality evals:** faithfulness and citation accuracy with an LLM judge.
 
 ## Quickstart
