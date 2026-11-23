@@ -9,11 +9,17 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from .chunking import Chunk
 from .embed import Embedder
-from .store import VectorStore
+
+if TYPE_CHECKING:  # imported lazily: the Qdrant client costs ~110 MB of RAM
+    from .store import VectorStore
+
+
+class VectorIndex(Protocol):
+    def search(self, vector: list[float], k: int) -> list[tuple[Chunk, float]]: ...
 
 
 @dataclass(frozen=True)
@@ -27,7 +33,7 @@ class Retriever(Protocol):
 
 
 class DenseRetriever:
-    def __init__(self, embedder: Embedder, store: VectorStore):
+    def __init__(self, embedder: Embedder, store: VectorIndex):
         self.embedder = embedder
         self.store = store
 

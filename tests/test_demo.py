@@ -1,9 +1,11 @@
 """The hosted demo: FastEmbed backend and the in-memory bootstrap."""
 
 import dataclasses
+import subprocess
 import sys
 import threading
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -148,3 +150,58 @@ def test_cache_ignored_when_corpus_changes(tmp_path):
     again = CountingEmbedder()
     build_demo(s, tmp_path / "x", embedder_factory=lambda m: again)
     assert again.calls == 1
+
+
+# ---------- memory-saving pieces ----------
+
+
+def test_array_store_exact_cosine_search():
+    from arxiv_rag.demo import ArrayStore
+
+    emb = HashingEmbedder()
+    store = ArrayStore(CORPUS, emb.embed_documents([c.text for c in CORPUS]))
+    hits = store.search(emb.embed_query("low rank adapters"), 2)
+    assert hits[0][0].chunk_id == "p3::0"
+    assert hits[0][1] >= hits[1][1]  # sorted by score
+    assert len(store.search(emb.embed_query("x"), 99)) == len(CORPUS)  # k capped
+
+
+def test_array_store_rejects_mismatch():
+    from arxiv_rag.demo import ArrayStore
+
+    with pytest.raises(ValueError):
+        ArrayStore(CORPUS, [[1.0, 0.0]])
+
+
+def test_build_subprocess_streams_progress():
+    from arxiv_rag.demo import run_build_subprocess
+
+    lines = []
+    cmd = [sys.executable, "-c", "print('Downloading...'); print('Build finished.')"]
+    run_build_subprocess(Path("ids.txt"), lines.append, cmd=cmd)
+    assert lines == ["Downloading...", "Build finished."]
+
+
+def test_build_subprocess_failure_shows_its_output():
+    from arxiv_rag.demo import run_build_subprocess
+
+    cmd = [sys.executable, "-c", "print('step 1'); raise SystemExit('arXiv unreachable')"]
+    with pytest.raises(RuntimeError, match="arXiv unreachable"):
+        run_build_subprocess(Path("ids.txt"), lambda m: None, cmd=cmd)
+
+
+def test_demo_never_loads_heavy_libraries():
+    # The web process must stay small: no Qdrant client, PyTorch, PyMuPDF or LiteLLM at import.
+    code = (
+        "import sys, arxiv_rag.demo, arxiv_rag.ui; "
+        "heavy = ('qdrant_client', 'torch', 'pymupdf', 'fitz', 'litellm'); "
+        "print([m for m in heavy if m in sys.modules])"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "[]"
+
+
+def test_fastembed_uses_small_batches():
+    import inspect
+
+    assert inspect.signature(embed.FastEmbedEmbedder).parameters["batch_size"].default <= 8

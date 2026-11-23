@@ -48,9 +48,11 @@ class SentenceTransformerEmbedder:
 class FastEmbedEmbedder:
     """Same BGE models via ONNX Runtime (FastEmbed): no PyTorch, ~10x less memory. Used by the
     hosted demo. Its weights are quantized, so its vectors differ slightly from the
-    sentence-transformers version: never mix the two in one index."""
+    sentence-transformers version: never mix the two in one index.
 
-    def __init__(self, model_name: str, batch_size: int = 64):
+    Small default batch: attention memory grows with batch size (see demo.py)."""
+
+    def __init__(self, model_name: str, batch_size: int = 4):
         from fastembed import TextEmbedding
 
         self.model = TextEmbedding(model_name)
